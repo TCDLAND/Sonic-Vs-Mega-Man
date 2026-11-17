@@ -6,3 +6,10 @@ Este proyecto es un videojuego de peleas 2D desarrollado con HTML, CSS y JavaScr
 El juego reúne personajes de los universos de Sonic y Mega Man, cada uno con diferentes habilidades, ataques y movimientos.
 
 El objetivo es crear combates entre personajes de ambos universos y seguir agregando nuevos luchadores y mecánicas.
+
+
+## Autor
+
+Carlos David Vázquez Mellado Benavides
+
+Proyecto desarrollado como práctica de programación y desarrollo de videojuegos.
