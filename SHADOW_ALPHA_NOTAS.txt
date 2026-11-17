@@ -1,0 +1,10 @@
+SHADOW ALPHA - Integracion al juego completo
+
+31 hojas integradas con celdas de 49 px x altura variable.
+Shadow seleccionable con sprites reales; idle, run, dash, jumping, falling, landing, stopping y ataques basicos asociados a las entradas existentes.
+Catalogo de animaciones adicionales preservado en js/shadow.js para su integracion posterior.
+
+NO IMPLEMENTADO TODAVIA: Chaos Control/detencion temporal, teleport ofensivo, disparos Chaos Magic, trampas Roaming Chaos, efectos y hitboxes exclusivas de cada ataque. Las animaciones correspondientes SI estan catalogadas, no activadas en combate.
+
+Pendientes: confirmar pivote Shadow7 turning, ajuste exacto de Air Magic y loop de Slider.
+No se modificaron los codigos de otros personajes.

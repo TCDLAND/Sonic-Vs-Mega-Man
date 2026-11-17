@@ -1,0 +1,23 @@
+ACTUALIZACION DE COMBATE - PROTOTIPO
+
+- 150 HP para los 14 personajes.
+- Defensa individual:
+  Knuckles 80%, X 88%, Shadow 88%, Zero 93%, Eggman 93%, Wily 93%, Mega Man Zero 93%,
+  Bass 100%, Emerl 100%, Silver 100%, Espio 106%, Rock 112%, Sonic 120%, Proto Man 130%.
+- Debug de daño activado en pantalla y consola.
+- Buster cargable implementado para X, Zero, Rock y Proto Man/Blues.
+  X: 7 / 14 / 23 / 34
+  Zero: 6 / 12 / 21
+  Rock: 6 / 12 / 20
+  Proto Man: 6 / 11 / 18
+- X Buster Nv.2 = 14 como referencia de balance.
+- Spin Dash:
+  Sonic 9/15/23
+  Shadow 12/20/30
+  Espio 10/17/26
+  Silver 8/13/19
+  Knuckles 13/22/34
+- Audio de carga de Spin inicia desde 0.6 s.
+- Wall Slide / Wall Jump preparado para X y Zero en los lados de los pilares grandes de Highway.
+- Emerl queda sin su nueva mecanica de copia; se reserva para la siguiente actualizacion.
+- Rush / Beat / Eddie / Treble como invocaciones vulnerables queda pendiente de diseno.
