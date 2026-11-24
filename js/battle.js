@@ -173,10 +173,10 @@ export function startBattle(storyMatch) {
         let power = 0;
         for (const member of roster) {
             if (member.characterId === 'emerl') continue;
-            member.maxPower = 500;
+            member.maxPower = 300;
             Object.defineProperty(member, 'power', {
                 get: () => power,
-                set: value => { power = Math.max(0, Math.min(500, value)); }
+                set: value => { power = Math.max(0, Math.min(300, value)); }
             });
         }
     }

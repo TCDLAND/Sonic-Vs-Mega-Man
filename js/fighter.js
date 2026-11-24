@@ -123,6 +123,7 @@ export class Fighter {
         this.health = MAX_HEALTH;
         this.maxPower = 100;
         this.power = 0;
+        this.meterApproachCarry = 0;
         this.defenseMultiplier = 1;
         this.characterId = 'fighter';
         this.wallSliding = false;
@@ -401,6 +402,19 @@ export class Fighter {
         const backPressed = this.keys[backKey];
 
         const hitstunned = this.isHitstunned();
+        const centerX = this.x + this.width / 2;
+        const approachDir = Math.sign(opponentX - centerX);
+        const walkingToward = this.isGrounded && approachDir !== 0 &&
+            this.keys[approachDir > 0 ? this.controls.right : this.controls.left] &&
+            !hitstunned && !this.isAttacking() && !this.isDashing && !this.isSpinDashActive &&
+            !this.isSpinning && !this.isGuarding && !this.isVulnerable && !this.wasInAirFromKnockback;
+        if (walkingToward) {
+            this.meterApproachCarry += 1;
+            if (this.meterApproachCarry >= 24) {
+                this.addPower(1);
+                this.meterApproachCarry = 0;
+            }
+        } else this.meterApproachCarry = 0;
         if (!hitstunned && !this.isAttacking() && !this.isSpinDashActive && !this.isSpinning && this.isGrounded && !this.isVulnerable && !this.wasInAirFromKnockback && combatNow() >= (this.guardBrokenUntil || 0)) {
             if (backPressed) {
                 this.isGuarding = true;

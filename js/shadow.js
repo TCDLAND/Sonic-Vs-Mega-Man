@@ -702,7 +702,7 @@ ctx.strokeStyle='#cba4ff';ctx.lineWidth=4;ctx.beginPath();ctx.arc(centerX,center
   }
   getShadowFrameIndex(name){
     const seq=SHADOW_ANIMATIONS[name];if(!seq?.length)return 0;
-    if(name==='run')return Math.floor(this.shadowRunLoopTick/1.375)%seq.length;
+    if(name==='run')return this.shadowRunLoopTick%seq.length;
     if(name==='runStart')return Math.min(1,Math.floor(this.shadowRunStartTick/2));
     if(name==='runEnd')return Math.min(3,Math.floor((8-this.shadowRunEndTicks)/2));
     if(name==='chaosMagic'&&this.magicCharge)return Math.min(4,Math.floor(this.magicAnimTick/3));

@@ -202,8 +202,11 @@ export function dealDamage(receiver, baseDamage, options = {}) {
   }
   impactWind(receiver,guarded?raw:finalDamage,options,guarded);
   if (finalDamage > 0) {
-    attacker?.addPower?.(finalDamage * 0.55);
-    receiver?.addPower?.(finalDamage * 0.25);
+    // Los tiros básicos mantienen su daño, pero casi no alimentan el medidor.
+    // Para el resto premiamos el combate activo, y damos una fracción al rival.
+    const basicShot = Boolean(options.basicShot);
+    attacker?.addPower?.(finalDamage * (basicShot ? 0.025 : 0.82));
+    receiver?.addPower?.(finalDamage * (basicShot ? 0.04 : 0.38));
   }
 
   if (finalDamage > 0) {

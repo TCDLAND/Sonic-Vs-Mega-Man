@@ -132,13 +132,13 @@ export function drawCombatHud(now,remaining) {
         const visual=display.get(active);
         visual.power=power+(visual.power-power)*Math.exp(-visual.dt/80);
         plate(reflect(81,410),666,410,31,color);
-        for(let j=0;j<5;j++){
-            const x=reflect(115+j*70,64), y=674;
-            ctx.save(); polygon(x,y,64,15,6); ctx.clip();
-            ctx.fillStyle='#242c46';ctx.fillRect(x,y,64,15);
-            const amount=64*clamp((visual.power-j*100)/100);
+        for(let j=0;j<3;j++){
+            const x=reflect(115+j*113,107), y=674;
+            ctx.save(); polygon(x,y,106,15,6); ctx.clip();
+            ctx.fillStyle='#242c46';ctx.fillRect(x,y,106,15);
+            const amount=106*clamp((visual.power-j*100)/100);
             ctx.fillStyle=color;ctx.shadowColor=color; ctx.shadowBlur=level*2;
-            ctx.fillRect(right?x+64-amount:x,y,amount,15);
+            ctx.fillRect(right?x+106-amount:x,y,amount,15);
             ctx.restore();
         }
         plate(reflect(22,97),646,97,65,color,22);
