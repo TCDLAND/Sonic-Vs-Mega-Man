@@ -139,9 +139,9 @@ function launch([first,second],swap=false) {
     game.battleStage=battleStages[0];
     game.mode=current.teamSize===3?'team':'cpu';
     game.controlOverrides={p1:!pair[0].human,p2:!pair[1].human};
+    game.tournamentSeconds=current.simulate?SIM_SECONDS:TURN_SECONDS;
     startBattle({rosters:pair.map(entry=>entry.roster),isolateCpu:current.simulate});
     if (pair.every(entry=>!entry.human)) beginTournamentDamage(game.teamFighters);
-    game.tournamentSeconds=current.simulate?SIM_SECONDS:TURN_SECONDS;
     if(current.simulate) {
         for(const fighter of [game.p1,game.p2]) {
             fighter.isIntroActive=false;fighter.introDone=true;
