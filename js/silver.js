@@ -60,10 +60,11 @@ function ring(x,y,r,golden,phase=0) {
     ctx.restore();
 }
 
-function drawFieldPortal(x,y,age,duration) {
-    const phase=Math.min(age,duration-age);
+function drawFieldPortal(x,y,age,closingRemaining=null) {
+    if (age<0) return;
+    const phase=closingRemaining==null?Math.min(age,150):Math.min(age,closingRemaining);
     if (phase<=0) return;
-    const index=phase<150?Math.min(3,Math.floor(phase/40)):[3,4,5,4][Math.floor(age/65)%4];
+    const index=age<150?Math.min(3,Math.floor(age/40)):[3,4,5,4][Math.floor(age/65)%4];
     const frame=updatedFrame('silver-guard','impact',index,x,y+62,2.2,1);
     if (frame) drawRobotFrame(ctx,frame,game.cameraX,Math.min(1,phase/65));
 }
@@ -136,6 +137,9 @@ export class Silver extends PrototypeFighter {
         this.pose={key:'idle',at:combatNow(),dir:1};
         this.superTapAt=-Infinity;
         this.absorbReadyAt=0;
+        this.absorbButtonHeld=false;
+        this.absorbClosingAt=0;
+        this.absorbRecoveryUntil=0;
         this.grabReadyAt=0;
         this.rocks=[];
         this.caught=[];
@@ -144,7 +148,7 @@ export class Silver extends PrototypeFighter {
     }
     // La barra triple conserva la escala de gasto de los supers existentes.
     addPower(amount) { return super.addPower(amount*2.6); }
-    isBusy() { return super.isBusy() || Boolean(this.robotMove || this.transformAt!=null); }
+    isBusy() { return super.isBusy() || Boolean(this.robotMove || this.transformAt!=null || this.absorbRecoveryUntil>combatNow()); }
     isAttacking() { return super.isAttacking() || Boolean(this.robotMove || this.transformAt!=null); }
     checkDoubleTap(direction,targetX) { if (this.isGrounded && !this.isBusy()) super.checkDoubleTap(direction,targetX); }
 
@@ -187,7 +191,7 @@ export class Silver extends PrototypeFighter {
         return true;
     }
 
-    startTechnique(key,target,dir) {
+    startTechnique(key,target,dir,holdField=false) {
         const spec=specs[key], now=combatNow();
         if (!spec || this.isBusy() || this.isVulnerable || this.isIntroActive || this.tagLockedUntil>now ||
             (key==='field' && now<this.absorbReadyAt) || (key==='grab' && now<this.grabReadyAt) ||
@@ -202,6 +206,8 @@ export class Silver extends PrototypeFighter {
         this.robotMove.target=target;
         this.superTapAt=-Infinity;
         if (key==='field') {
+            this.absorbButtonHeld=holdField;
+            this.absorbClosingAt=0;
             this.absorbReadyAt=now+1650;
         }
         if (key==='grab') this.grabReadyAt=now+2100;
@@ -237,11 +243,7 @@ export class Silver extends PrototypeFighter {
         }
         else if (code===c.kickHeavy) key=air?(horizontal?'airDash':'airHeavy'):down?'barrage':horizontal?'airDash':'heavy';
         else if (code===this.aux1) {
-            if (this.robotMove?.spec.key==='field') {
-                this.robotMove=null;
-                this.releaseCaught();
-                return;
-            }
+            if (this.robotMove?.spec.key==='field') { this.absorbButtonHeld=true; this.absorbClosingAt=0; return; }
             key=down?'grab':'field';
         }
         else if (code===this.aux2) key=down?'shock':horizontal?'strongPush':'push';
@@ -257,7 +259,7 @@ export class Silver extends PrototypeFighter {
             if (age>=move.spec.ms*2) move.next={key,dir:key==='airDash'?horizontal:0};
             return;
         }
-        this.startTechnique(key,target,key==='airDash'?horizontal:0);
+        this.startTechnique(key,target,key==='airDash'?horizontal:0,key==='field' && code===this.aux1);
     }
 
     fieldIntersects(shot, assist) {
@@ -270,8 +272,11 @@ export class Silver extends PrototypeFighter {
         if (!shot.active || this.shadowFrozenBy || this.health<=0 || !this.fieldIntersects(shot,assist)) return false;
         const move=assist??this.robotMove;
         if (!assist && move?.spec.key!=='field') return false;
-        const age=combatNow()-move.started;
-        if (age<(assist?180:100) || age>(assist?550:950)) return false;
+        const now=combatNow();
+        const age=now-move.started;
+        const heldField=!assist && (this.absorbButtonHeld || this.absorbClosingAt>0);
+        if (age<(assist?180:100) || (heldField && !this.absorbButtonHeld && now>this.absorbClosingAt) ||
+            (!assist && !heldField && age>950) || (assist && age>550)) return false;
         const kind=silverShotKind(shot);
         if (!kind || (assist && kind!=='energy')) return false;
         shot.active=false;
@@ -318,6 +323,12 @@ export class Silver extends PrototypeFighter {
         this.caught=[];
     }
 
+    releaseAbsorb(code) {
+        if (code!==this.aux1 || !this.absorbButtonHeld || this.robotMove?.spec.key!=='field') return;
+        this.absorbButtonHeld=false;
+        this.absorbClosingAt=combatNow()+280;
+    }
+
     grip(move,target) {
         if (target.tagLockedUntil>combatNow() || target.isGuarding || target.shieldRaised || target.minerPhase==='under' || target.shadowFrozenBy ||
             target.silverGrabImmuneUntil>combatNow() || target.health<=0) return false;
@@ -351,6 +362,8 @@ export class Silver extends PrototypeFighter {
     cancelSilverMoves() {
         this.letGo();
         this.robotMove=null;
+        this.absorbButtonHeld=false;
+        this.absorbClosingAt=0;
         this.hoverUntil=0;
         this.transformAt=null;
         this.caught=[];
@@ -441,6 +454,13 @@ export class Silver extends PrototypeFighter {
 
     update(opponentX,self) {
         const now=combatNow(), grounded=this.isGrounded;
+        if (this.robotMove?.spec.key==='field' && !this.absorbButtonHeld && this.absorbClosingAt && now>=this.absorbClosingAt) {
+            this.robotMove=null;
+            this.absorbClosingAt=0;
+            this.absorbRecoveryUntil=now+360;
+            this.absorbReadyAt=Math.max(this.absorbReadyAt,now+1300);
+            if (this.caught.length) this.releaseCaught();
+        }
         const move=this.robotMove;
         const transforming=this.transformAt!=null;
         if (transforming && !this.superSilver && now-this.transformAt>=680) {
@@ -538,6 +558,7 @@ export class Silver extends PrototypeFighter {
         const count=SILVER_FRAMES[this.superSilver?1:0][key].length;
         const i=Math.floor((now-at)/ms);
         let index=!move&&['idle','walk','run','dash','spin','spinCharge'].includes(key)?i%count:i;
+        if (move?.spec.key==='field' && this.absorbButtonHeld) index=i%count;
         if (key==='guard') {
             const blocked=this.lastGuardImpact?.blocked && now-this.lastGuardImpact.at<175;
             if (!blocked) {
@@ -584,7 +605,8 @@ export class Silver extends PrototypeFighter {
         }
         if (move) {
             const age=now-move.started;
-            if (move.spec.key==='field') drawFieldPortal(middle(this)+move.direction*78,foot(this)-72,age-100,850);
+            if (move.spec.key==='field') drawFieldPortal(middle(this)+move.direction*78,foot(this)-72,age-100,
+                this.absorbButtonHeld || !this.absorbClosingAt ? null : this.absorbClosingAt-now);
             if (move.spec.key==='shock' && age>175 && age<520) ring(middle(this),foot(this)-68,49+(age-175)*.25,golden,age/35);
             if (move.spec.cinematic && age>=170) ring(middle(this),foot(this)-82,85+Math.sin(age/82)*24,golden,age/24);
             if (this.grabTarget) {

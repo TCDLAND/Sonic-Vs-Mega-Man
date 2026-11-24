@@ -229,6 +229,21 @@ canvas {
     border: 1px solid #7399d0; border-radius: 7px;
 }
 .tournament-status pre { max-height: 34vh; }
+.tournament-parallel {
+    inset: 3vh 2vw; width: auto; max-width: none; max-height: 94vh;
+    box-sizing: border-box; overflow: auto; padding: 12px;
+    background: #07101df5; z-index: 40;
+}
+.tournament-parallel > span { display: inline-block; margin: 6px 8px; }
+.simulation-lanes { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 10px; }
+.simulation-lane { min-width: 0; padding: 6px; background: #10192a; border: 1px solid #526b8e; border-radius: 6px; }
+.simulation-lane strong { display: block; margin: 0 0 5px; font: 12px system-ui; color: #c9e2ff; }
+.simulation-lane iframe { display: block; width: 100%; aspect-ratio: 16/9; border: 0; background: #000; }
+body.simulation-lane { display: block; width: 100vw; height: 100vh; background: #000; }
+body.simulation-lane > #gameCanvas { width: 100vw; height: 100vh; max-height: none; aspect-ratio: 16/9; }
+body.simulation-lane .tournament-status { right: 4px; bottom: 4px; padding: 2px; font-size: 10px; }
+body.simulation-lane .tournament-status button, body.simulation-lane .tournament-status details { display: none; }
+@media (max-width: 850px) { .simulation-lanes { grid-template-columns: 1fr; } }
 .online-room-dialog {
     width: min(680px, calc(100vw - 36px));
     border: 1px solid #58cbb9;

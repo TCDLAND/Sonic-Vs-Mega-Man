@@ -26,6 +26,10 @@ export function updateRobotMove(fighter, applyX = false) {
     const move = fighter.robotMove;
     if (!move) return;
     const frame = Math.floor((combatNow() - move.started) / move.spec.ms);
+    // Silver's field is a held stance; its own update ends it after the
+    // release animation, so the generic finite-move timer must leave it up.
+    if (move.spec.key === 'field' && (fighter.absorbButtonHeld ||
+        (fighter.absorbClosingAt && combatNow() < fighter.absorbClosingAt))) return;
     if (frame >= move.spec.frames) {
         fighter.robotMove = null;
         return;

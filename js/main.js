@@ -1,6 +1,6 @@
 import { drawCombatHud, tickReserveHealth } from './combat-hud.js';
 import { pollXboxPads } from './xbox-pad.js';
-import { tickAssistKeys } from './input.js?v=online-controls-1';
+import { tickAssistKeys } from './input.js?v=combo-silver-2';
 import { drawTeamAssists, tickTeamAssists, interceptTeamAssist } from './team-assists.js';
 import { drawWind, emitWind } from './wind-effects.js';
 import { pollStagePad } from './battle-stages.js';
@@ -21,12 +21,12 @@ import { storyStage, showStoryResult, pollStoryPad } from './story-mode.js';
 import { bgImage, trebleSprite1, bassSprite3 } from './assets.js';
 import { drawSelectionScreen } from './selection.js';
 import { drawCountdown, drawModeScreen, drawResultScreen } from './menu-screen.js?v=online-3v3-2';
-import { setupInput } from './input.js?v=online-controls-1';
+import { setupInput } from './input.js?v=combo-silver-2';
 import { switchTeamFighter } from './battle.js?v=team3-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';
 import { dealDamage, DEBUG_COMBAT } from './combat-system.js';
-import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation } from './tournament.js';
+import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, startTournament, cancelTournament, tournamentRunning } from './tournament.js?v=simultaneous-1';
 import { HIGHWAY_WALLS, landOnStagePlatform } from './wall-system.js';
 import { checkSonicDashAttack, checkSonicRocketAttack } from './sonic.js';
 import {
@@ -701,6 +701,7 @@ function gameLoop(time = performance.now(), render = true) {
 }
 
 function frameDriver(time) {
+    sampleTournamentMemory(time);
     if (!tournamentSimulationActive()) pollXboxPads();
     if (!tournamentSimulationActive()) gameLoop(time);
     else if (!game.paused && !tournamentSimulationPaused() && !document.hidden) {
@@ -721,4 +722,16 @@ function frameDriver(time) {
 }
 
 setupInput();
+if(new URLSearchParams(location.search).has('simulationLane')) {
+    window.addEventListener('message',event=>{
+        if(event.source!==window.parent||event.origin!==location.origin)return;
+        if(event.data?.type==='svmm-simulation-start'&&!tournamentRunning()) {
+            startTournament({kind:'roundRobin',roster:event.data.roster,lanePairs:event.data.lanePairs,
+                laneId:event.data.laneId,total:1,teamSize:1,simulate:true});
+        } else if(event.data?.type==='svmm-simulation-stop'&&tournamentRunning()) cancelTournament();
+    });
+    window.addEventListener('load',()=>window.parent.postMessage({
+        type:'svmm-simulation-lane-ready',laneId:Number(new URLSearchParams(location.search).get('lane'))
+    },location.origin),{once:true});
+}
 requestAnimationFrame(frameDriver);

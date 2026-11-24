@@ -22,11 +22,11 @@ import { startBattle, returnToCharacterSelect, switchTeamFighter, chooseTraining
 import { BusterProjectile, getBusterLevel } from './buster-system.js';
 import { getTouchedWall } from './wall-system.js';
 import { selectionIndexAt, canRandomizeSelection, randomSelectionAt } from './selection.js';
-import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, cancelTournament } from './tournament.js';
+import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, cancelTournament } from './tournament.js?v=simultaneous-1';
 import { modeOptionAt, resultActionAt } from './menu-screen.js?v=online-3v3-2';
 import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
-import { isBattleHelpOpen, toggleBattlePause } from './pause-menu.js?v=online-controls-1';
+import { isBattleHelpOpen, toggleBattlePause } from './pause-menu.js?v=combo-silver-2';
 import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
 import { openOnlineLobby, handleOnlineSelectionKey, releaseOnlineInputs, routeOnlineKey } from './online.js?v=online-controls-1';
 
@@ -39,6 +39,42 @@ function isHumanInputForCpu(event) {
 function confirmSelectionAndStart() {
     const s = game.characterSelection;
     if (s.p1Confirmed && s.p2Confirmed) chooseBattleStage(game, startBattle);
+}
+
+// Extiende los básicos de personajes que aún no tienen una cadena nativa.
+// El siguiente toque solo cancela recuperación si el golpe anterior conectó.
+const BASIC_COMBOS = {
+    espio: { button:'attack', hit:f=>f.jabHitDone, next:[f=>f.startKickLight(), f=>f.startKickHeavy()], clear:f=>{f.isJabActive=false;f.isKickLightActive=false;f.isKickHeavyActive=false;} },
+    knuckles: { button:'attack', hit:f=>f.kHit, next:[f=>f.startPunch2(), f=>f.startUpper()], clear:f=>{f.kAction=null;f.kHit=false;f.facingLocked=false;} },
+    emerl: { button:'attack', hit:f=>Boolean(f.robotMove?.hit), next:[f=>f.startEmerlMove('upper'), f=>f.startEmerlMove('roundhouse')], clear:f=>{f.robotMove=null;} },
+    rock: { button:'kickLight', hit:f=>f.slashHit, next:[f=>f.startSlashClaw(), f=>f.startSlashClaw()], clear:f=>{f.slashActive=false;f.slashHit=false;f.facingLocked=false;} },
+    x: { button:'kickLight', hit:f=>Boolean(f.saber?.hit), next:[f=>f.startSaber(), f=>f.startSaber()], clear:f=>{f.saber=null;f.facingLocked=false;} },
+    zero: { button:'attack', hit:f=>f.zeroAttackHit, next:[f=>f.startSaberAttack('B'), f=>f.startSaberAttack('C')], clear:f=>{f.zeroAttack=null;f.zeroAttackHit=false;f.facingLocked=false;} },
+    bass: { button:'kickLight', hit:f=>Boolean(f.robotMove?.hit), next:[f=>f.startRobotAction('punch'), f=>f.startRobotAction('kick')], clear:f=>{f.robotMove=null;} },
+    protoman: { button:'kickLight', hit:f=>Boolean(f.robotMove?.hit), next:[f=>f.startRobotAction('punch'), f=>f.startRobotAction('bash')], clear:f=>{f.robotMove=null;} }
+};
+
+function handleBasicCombo(fighter, code) {
+    const combo=BASIC_COMBOS[fighter.characterId];
+    const auxLeft=fighter===game.p1?'KeyQ':'BracketLeft';
+    const auxRight=fighter===game.p1?'KeyE':'BracketRight';
+    if (!combo || code!==fighter.controls[combo.button] || fighter.keys[fighter.controls.crouch] ||
+        fighter.keys[fighter.controls.left] || fighter.keys[fighter.controls.right] || fighter.keys[fighter.controls.jump] ||
+        fighter.keys[auxLeft] || fighter.keys[auxRight]) return false;
+    const now=combatNow();
+    const chain=fighter.basicCombo;
+    if (chain && chain.code===code && now<=chain.expires && chain.step>0) {
+        if (!combo.hit(fighter)) { fighter.basicCombo=null; return false; }
+        combo.clear(fighter);
+        const start=combo.next[chain.step-1];
+        if (!start || !start(fighter)) { fighter.basicCombo=null; return false; }
+        chain.step++;
+        chain.expires=now+720;
+        if (chain.step>combo.next.length) fighter.basicCombo=null;
+        return true;
+    }
+    fighter.basicCombo={code,step:1,expires:now+720};
+    return false;
 }
 
 function startRandomBattle() {
@@ -293,6 +329,10 @@ export function setupInput() {
 
         p1.keys[e.code] = true;
         p2.keys[e.code] = true;
+
+        if (!e.repeat) for (const fighter of [p1,p2]) {
+            if (handleBasicCombo(fighter,e.code)) return;
+        }
 
         for (const [fighter, target] of [[p1,p2],[p2,p1]]) {
             if (e.repeat) continue;
@@ -668,6 +708,7 @@ export function setupInput() {
     });
 
     window.addEventListener('keyup', (e) => {
+        for (const fighter of [game.p1,game.p2]) fighter?.releaseAbsorb?.(e.code);
         if (game.mode==='online' && isBattleHelpOpen() && !e.__onlineForwarded) return;
         const assistKey = e.assistSlot == null ? e.code : e.code + e.assistSlot;
         const press = assistKeys.get(assistKey);

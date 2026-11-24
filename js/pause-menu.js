@@ -45,7 +45,7 @@ export const moves = {
         ['Continuación aérea', 'Salta al conectar M, luego J / I en aire'],
         ['Levitación', 'Botón Jet. Abajo para bajar'],
         ['Psychic Dash', 'Dirección + K en suelo o aire'],
-        ['Portal de absorción', 'Aux1 abre o cierra. Cura un 20 % del daño de energía absorbido'],
+        ['Portal de absorción', 'Mantén Aux1 para absorber; al soltar tarda en cerrarse y quedas vulnerable un instante. Cura un 20 % del daño de energía absorbido'],
         ['Psychic Push rápido / fuerte', 'Aux2 / Dirección + Aux2'],
         ['Psychic Grab', 'Abajo + Aux1. Decide con dirección; mantén abajo para estrellar'],
         ['Psychic Throw / Orbit', 'Abajo + J / Abajo + M'],
