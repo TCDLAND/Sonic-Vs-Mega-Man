@@ -6,7 +6,7 @@ import { startBattle } from './battle.js';
 const P1_TO_P2 = {
     KeyA: 'ArrowLeft', KeyD: 'ArrowRight', KeyW: 'ArrowUp', KeyS: 'ArrowDown',
     KeyJ: 'Comma', KeyI: 'Period', KeyM: 'Minus', KeyK: 'Equal',
-    Space: 'Enter', KeyQ: 'BracketLeft', KeyE: 'BracketRight', KeyL: 'Slash'
+    Space: 'Enter', KeyQ: 'BracketLeft', KeyE: 'BracketRight', KeyL: 'Slash', KeyU: 'Quote'
 };
 
 let peer = null;
@@ -17,6 +17,7 @@ let statusNode = null;
 let stagePickerOpened = false;
 let inputSequence = 0;
 let roomCode;
+let teamSize = 1;
 const viewers = new Map();
 let broadcast;
 
@@ -37,7 +38,9 @@ function setUpOnlineGame(localRole) {
     role = localRole;
     game.onlineRole = localRole;
     game.mode = 'online';
-    game.teamRosters = null;
+    game.controlOverrides = null;
+    game.teamRosters = teamSize===3 ? [[],[]] : null;
+    stagePickerOpened = false;
     game.characterSelection.p1Index = game.characterSelection.p1Index ?? 0;
     game.characterSelection.p2Index = game.characterSelection.p2Index ?? 1;
     game.characterSelection.p1Confirmed = false;
@@ -48,10 +51,10 @@ function setUpOnlineGame(localRole) {
     if (localRole === 'host') sendSelectionState();
 }
 
-function sendSelectionState() {
+function sendSelectionState(reset = false) {
     const s = game.characterSelection;
     send({ type: 'selection-state', p1Index: s.p1Index, p2Index: s.p2Index,
-        p1Confirmed: s.p1Confirmed, p2Confirmed: s.p2Confirmed });
+        p1Confirmed: s.p1Confirmed, p2Confirmed: s.p2Confirmed, rosters: game.teamRosters, reset });
 }
 
 function maybeChooseStage() {
@@ -61,10 +64,14 @@ function maybeChooseStage() {
     setStatus('Ambos listos · Jugador 1 elige escenario');
     chooseBattleStage(game, () => {
         send({ type: 'battle-start', stageId: game.battleStage?.id,
-            seconds: game.selectedRoundSeconds,
+            seconds: game.selectedRoundSeconds, rosters: game.teamRosters,
             p1Index: game.characterSelection.p1Index, p2Index: game.characterSelection.p2Index });
         startBattle();
-        setStatus(`En línea · Código para espectadores: ${roomCode}`);
+        setStatus(`En línea ${teamSize}v${teamSize} · Código para espectadores: ${roomCode}`);
+    }, () => {
+        stagePickerOpened = false;
+        if (teamSize===3) game.teamRosters = [[],[]];
+        sendSelectionState(true);
     });
 }
 
@@ -73,9 +80,12 @@ function createRoomDialog() {
     dialog = document.createElement('dialog');
     dialog.className = 'online-room-dialog';
     dialog.innerHTML = `
-      <h2>Reta en línea · prueba 1v1</h2>
+      <h2>Reta en línea</h2>
       <p>Conexión directa entre navegadores. El creador será Jugador 1; quien se una será Jugador 2 y también jugará con WASD + JIKM.</p>
       <div class="online-room-actions">
+        <label>Formato para crear una sala<select data-format>
+          <option value="1">1v1</option><option value="3">3v3</option>
+        </select></label>
         <button type="button" data-create>Crear sala</button>
         <label>Código de sala<input data-room-code maxlength="8" autocomplete="off" placeholder="Ej. A4F92C"></label>
         <button type="button" data-join>Jugar</button>
@@ -159,6 +169,7 @@ function createRoom() {
     if (peer) return;
     const code = Array.from(crypto.getRandomValues(new Uint8Array(4)), n => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n % 32]).join('');
     roomCode = code;
+    teamSize = Number(dialog.querySelector('[data-format]').value)===3 ? 3 : 1;
     const id = `svm-${code}`;
     if (!makePeer(id)) return;
     role = 'host-pending';
@@ -221,16 +232,19 @@ function handleHostMessage(message) {
     if (!message || typeof message !== 'object') return;
     if (message.type === 'hello') {
         setUpOnlineGame('host');
-        send({ type: 'ready' });
+        send({ type: 'ready', teamSize });
         sendSelectionState();
     } else if (message.type === 'selection') {
         const s = game.characterSelection;
         s.p2Index = Math.max(0, Math.min(s.chars.length - 1, Number(message.index) || 0));
-        s.p2Confirmed = Boolean(message.confirmed);
+        if (teamSize===3) {
+            game.teamRosters[1] = validRoster(message.roster);
+            s.p2Confirmed = game.teamRosters[1].length===3;
+        } else s.p2Confirmed = Boolean(message.confirmed);
         sendSelectionState();
         maybeChooseStage();
     } else if (message.type === 'input' && typeof message.code === 'string') {
-        dispatchKey(message.down ? 'keydown' : 'keyup', P1_TO_P2[message.code], message.sequence);
+        dispatchKey(message.down ? 'keydown' : 'keyup', P1_TO_P2[message.code], message.sequence,message.slot);
     } else if (message.type === 'rematch' && game.gameState === GAME_STATE.RESULT) {
         startBattle();
     }
@@ -239,16 +253,25 @@ function handleHostMessage(message) {
 function handleGuestMessage(message) {
     if (!message || typeof message !== 'object') return;
     if (message.type === 'ready') {
+        teamSize = message.teamSize===3 ? 3 : 1;
         setUpOnlineGame('guest');
     } else if (message.type === 'selection-state') {
         const s = game.characterSelection;
         s.p1Index = Math.max(0, Math.min(s.chars.length - 1, Number(message.p1Index) || 0));
-        s.p2Index = Math.max(0, Math.min(s.chars.length - 1, Number(message.p2Index) || 0));
         s.p1Confirmed = Boolean(message.p1Confirmed);
-        s.p2Confirmed = Boolean(message.p2Confirmed);
+        if (message.reset) s.p2Confirmed = false;
+        if (teamSize===3) {
+            game.teamRosters[0] = validRoster(message.rosters?.[0]);
+            if (message.reset) game.teamRosters[1] = [];
+        }
     } else if (message.type === 'battle-start') {
         const stage = battleStages.find(item => item.id === message.stageId);
         if (!stage) { setStatus('El anfitrión eligió un escenario que no cargó en esta versión.'); return; }
+        if (teamSize===3) {
+            const rosters = [validRoster(message.rosters?.[0]),validRoster(message.rosters?.[1])];
+            if (rosters.some(roster=>roster.length!==3)) return;
+            game.teamRosters = rosters;
+        }
         game.battleStage = stage;
         game.selectedRoundSeconds = normalizeRoundSeconds(message.seconds);
         game.characterSelection.p1Index = message.p1Index;
@@ -256,17 +279,24 @@ function handleGuestMessage(message) {
         startBattle();
         setStatus('En línea · usa tu WASD y JIKM para manejar al Jugador 2');
     } else if (message.type === 'input' && typeof message.code === 'string') {
-        dispatchKey(message.down ? 'keydown' : 'keyup', message.code, message.sequence);
+        dispatchKey(message.down ? 'keydown' : 'keyup', message.code, message.sequence,message.slot);
     } else if (message.type === 'rematch' && game.gameState === GAME_STATE.RESULT) {
         startBattle();
     }
 }
 
-function dispatchKey(type, code, sequence) {
+function validRoster(roster) {
+    if (!Array.isArray(roster)) return [];
+    const chars = game.characterSelection.chars;
+    return [...new Set(roster.filter(id=>chars.includes(id)))].slice(0,3);
+}
+
+function dispatchKey(type, code, sequence, slot) {
     if (!code) return;
     const event = new KeyboardEvent(type, { code, bubbles: true, cancelable: true });
     Object.defineProperty(event, '__onlineForwarded', { value: true });
     Object.defineProperty(event, '__onlineSequence', { value: sequence });
+    if (slot===0 || slot===1) Object.defineProperty(event, 'assistSlot', { value: slot });
     window.dispatchEvent(event);
 }
 
@@ -281,7 +311,7 @@ export function routeOnlineKey(event) {
     const inResult = game.gameState === GAME_STATE.RESULT;
     if (!inBattle && !inResult) return false;
 
-    if (inResult && ['KeyR', 'Enter', 'KeyJ'].includes(event.code) && !event.repeat) {
+    if (inResult && event.type==='keydown' && ['KeyR', 'Enter', 'KeyJ'].includes(event.code) && !event.repeat) {
         send({ type: 'rematch' });
         startBattle();
         event.preventDefault(); return true;
@@ -292,7 +322,7 @@ export function routeOnlineKey(event) {
 
     if (role === 'host') {
         if (Object.hasOwn(P1_TO_P2, event.code) && !event.__onlineForwarded && !event.repeat) {
-            send({ type: 'input', code: event.code, down: event.type === 'keydown', sequence: ++inputSequence });
+            send({ type: 'input', code: event.code, down: event.type === 'keydown', sequence: ++inputSequence, slot: event.assistSlot });
         }
         return false;
     }
@@ -301,9 +331,9 @@ export function routeOnlineKey(event) {
     const mapped = P1_TO_P2[event.code];
     if (!mapped) return false;
     if (event.repeat) { event.preventDefault(); return true; }
-    send({ type: 'input', code: event.code, down: event.type === 'keydown', sequence: ++inputSequence });
+    send({ type: 'input', code: event.code, down: event.type === 'keydown', sequence: ++inputSequence, slot: event.assistSlot });
     event.preventDefault();
-    dispatchKey(event.type, mapped);
+    dispatchKey(event.type, mapped, undefined, event.assistSlot);
     return true;
 }
 
@@ -328,12 +358,19 @@ export function handleOnlineSelectionKey(event) {
         let next = nextRow * 4 + col;
         if (next >= count) next = nextRow * 4 + (col % (count - nextRow * 4));
         s[indexKey] = next;
-    } else if (event.code === 'KeyJ') s[confirmedKey] = true;
+    } else if (event.code === 'KeyJ') {
+        if (teamSize===3) {
+            const roster = game.teamRosters[side==='p1'?0:1];
+            const fighter = s.chars[s[indexKey]];
+            if (!roster.includes(fighter)) roster.push(fighter);
+            s[confirmedKey] = roster.length===3;
+        } else s[confirmedKey] = true;
+    }
 
     if (role === 'host') {
         sendSelectionState();
         maybeChooseStage();
-    } else send({ type: 'selection', index: s.p2Index, confirmed: s.p2Confirmed });
+    } else send({ type: 'selection', index: s.p2Index, confirmed: s.p2Confirmed, roster: game.teamRosters?.[1] });
     return true;
 }
 

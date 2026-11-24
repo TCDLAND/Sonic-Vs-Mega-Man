@@ -31,7 +31,7 @@ export function normalizeRoundSeconds(value) {
 let activePicker;
 let previousPad = { x: 0, y: 0, action: false, back: false };
 
-export function chooseBattleStage(game, start) {
+export function chooseBattleStage(game, start, cancel) {
     const dialog = document.createElement('dialog');
     dialog.className = 'stage-picker';
     dialog.setAttribute('aria-label', 'Elegir escenario');
@@ -79,6 +79,7 @@ export function chooseBattleStage(game, start) {
             game.characterSelection.p1Confirmed = false;
             game.characterSelection.p2Confirmed = false;
             music.stop();
+            cancel?.();
         }
         activePicker = undefined;
         dialog.remove();

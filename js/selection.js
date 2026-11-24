@@ -356,7 +356,7 @@ export function drawSelectionScreen() {
     ctx.fillStyle = ready ? '#9bffc4' : '#fff';
     ctx.font = '900 13px system-ui, sans-serif';
     const controlsText = game.mode === 'online'
-        ? (game.onlineRole === 'host' ? 'ERES JUGADOR 1 · WASD + JIKM · ESPERANDO A TU RIVAL' : 'ERES JUGADOR 2 · USA WASD + JIKM COMO EL JUGADOR 1')
+        ? (game.teamRosters ? `3v3 · AZUL ${game.teamRosters[0].length}/3 · ROJO ${game.teamRosters[1].length}/3 · WASD + J` : game.onlineRole === 'host' ? 'ERES JUGADOR 1 · WASD + JIKM · ESPERANDO A TU RIVAL' : 'ERES JUGADOR 2 · USA WASD + JIKM COMO EL JUGADOR 1')
         : game.mode === 'ai'
         ? 'CONFIGURA IA AZUL Y ROJA: P1  A / D / W / S + J     •     P2  FLECHAS + ,'
         : ['cpu', 'team'].includes(game.mode)

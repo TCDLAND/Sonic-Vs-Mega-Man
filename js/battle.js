@@ -106,7 +106,7 @@ export function startBattle(storyMatch) {
         game.teamRosters = chooseTrainingTeams();
     }
     game.isolateCpu=Boolean(storyMatch?.isolateCpu);
-    const teamMatch = game.mode === 'ai' || game.mode === 'team' || Boolean(storyMatch);
+    const teamMatch = game.mode === 'ai' || game.mode === 'team' || Boolean(storyMatch) || (game.mode==='online' && game.teamRosters?.every(roster=>roster.length===3));
     const rosters = storyMatch?.rosters ?? game.teamRosters;
     game.teamActiveIndex = { p1: 0, p2: 0 };
     game.tagRequests = { p1: false, p2: false };

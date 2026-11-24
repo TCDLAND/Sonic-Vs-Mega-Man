@@ -109,7 +109,7 @@ export function drawModeScreen() {
     ctx.font = '800 15px system-ui';
     ctx.fillText(usingXbox()?'GUÍA DE PERSONAJES  ·  '+(deviceFor()==='playstation'?'△':'Y'):'GUÍA DE PERSONAJES  ·  G',295,663);
     rounded(490,637,300,40,9,'#123c45',game.modeCursor===6?'#79ffe1':'#4ca598',game.modeCursor===6?4:2);
-    ctx.fillStyle='#d7fff6';ctx.fillText('ONLINE · SALA 1v1',640,663);
+    ctx.fillStyle='#d7fff6';ctx.fillText('ONLINE · 1v1 / 3v3',640,663);
     rounded(835,637,300,40,9,'#3d265d',game.modeCursor===5?'#dec1ff':'#9070c0',game.modeCursor===5?4:2);
     ctx.fillStyle='#f5e5ff';ctx.fillText('TORNEOS Y SIMULACIÓN',985,663);
     ctx.textAlign = 'left';
