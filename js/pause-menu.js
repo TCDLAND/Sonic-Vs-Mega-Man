@@ -1,4 +1,4 @@
-import { usingXbox, xboxCommand } from './input-labels.js';
+import { deviceFor, usingXbox, xboxCommand } from './input-labels.js';
 import { music } from './music.js';
 import { game } from './state.js';
 import { applyBattleControllers, returnToCharacterSelect } from './battle.js?v=team3-1';
@@ -110,12 +110,49 @@ function clearInputs(fighter) {
     if (fighter.characterId === 'tails') fighter.chargeAt = null;
 }
 
-function playerPanel(fighter, side) {
+const essentialMoves = {
+    wily:[0,2,3], eggman:[2,5,8], emerl:[1,3,4], x:[0,1,3], zero:[1,2,11],
+    'megaman-zero':[1,3,4], silver:[4,6,11], chaos:[4,6,7], tails:[3,4,5],
+    'metal-sonic':[4,5,9], sonic:[1,5,6], shadow:[1,2,5], knuckles:[1,2,3],
+    bass:[1,5,6], protoman:[1,2,5], rock:[1,4,5], espio:[2,7,8]
+};
+
+const panelState = {
+    p1:{index:0,full:false},
+    p2:{index:0,full:false}
+};
+let browsingSide = 'p1';
+
+function playerPanel(active, side) {
     const blue = side === 'p1';
+    const state = panelState[side];
+    const team = [active,...(game.teamFighters?.[side] ?? []).filter(member=>member!==active)];
+    const fighter = team[state.index] ?? active;
+    const pad = usingXbox(side), playstation = deviceFor(side) === 'playstation';
     const panel = document.createElement('section');
+    panel.dataset.side = side;
     panel.className = blue ? 'pause-blue' : 'pause-red';
+    panel.addEventListener('focusin',()=>{ browsingSide = side; });
+    const button = (label, action, key) => {
+        const node = document.createElement('button');
+        node.type = 'button';
+        node.textContent = label;
+        node.dataset.pauseFocus = side+'-'+key;
+        node.onclick = action;
+        return node;
+    };
     const title = document.createElement('h2');
     title.textContent = fighter.characterName || fighter.characterId;
+    if (team.length > 1) {
+        const nav = document.createElement('nav');
+        nav.className = 'pause-roster';
+        nav.setAttribute('aria-label','Consultar compañero');
+        const position = document.createElement('span');
+        position.textContent = state.index === 0 ? 'En combate' : 'Reserva '+state.index;
+        nav.append(button(pad ? (playstation?'L2':'LT') : '←',()=>stepRoster(side,-1),'previous'),
+            position,button(pad ? (playstation?'R2':'RT') : '→',()=>stepRoster(side,1),'next'));
+        panel.append(nav);
+    }
     const label = document.createElement('label');
     label.textContent = blue ? 'Control azul ' : 'Control rojo ';
     const select = document.createElement('select');
@@ -126,38 +163,62 @@ function playerPanel(fighter, side) {
     select.addEventListener('change', () => {
         game.controlOverrides ??= {};
         game.controlOverrides[side] = select.value === 'cpu';
-        clearInputs(fighter);
+        clearInputs(active);
         applyBattleControllers();
     });
     label.append(select);
-    const list = document.createElement('dl');
-    const rows = [
-        ['Mover / saltar / agacharse', usingXbox(side) ? 'Cruceta o sticks · ↑ salto · ↓ agacharse' : blue ? 'A / D · W · S' : '← / → · ↑ · ↓'],
-        ['Guardia / dash', 'Atrás / doble toque de dirección'],
-        ...(moves[fighter.characterId] || (fighter.hasBuster ? [['Buster', 'Mantén J y suelta']] : []))
-    ];
-    if (fighter.supportsSpin) rows.push(['Spin Dash', (blue||usingXbox(side)?'Abajo + Espacio':'Abajo + Enter')+
-        ' para cargar. Mantén dirección al soltar abajo. En el suelo, mantén la opuesta para frenar y girar.']);
-    if (fighter.characterId === 'espio' || fighter.characterId === 'rock') {
-        rows.push(['Diagonales auxiliares', blue||usingXbox(side) ? 'Q / E' : '[ / ]']);
-    }
-    if (fighter.characterId === 'rock') rows.push(['Pedir Eddie', blue||usingXbox(side) ? 'E + I' : '] + Punto']);
-    if (game.teamFighters) {
+    panel.append(title);
+    if (state.index===0) panel.append(label);
+
+    const attacks = moves[fighter.characterId] || (fighter.hasBuster ? [['Buster', 'Mantén J y suelta']] : []);
+    const rows = state.full ? [
+        ['Mover / saltar / agacharse',pad?'Cruceta o sticks · ↑ salto · ↓ agacharse':blue?'A / D · W · S':'← / → · ↑ · ↓'],
+        ['Guardia / dash','Atrás / doble toque de dirección'], ...attacks
+    ] : (essentialMoves[fighter.characterId]?.map(index=>attacks[index]).filter(Boolean) ?? attacks.slice(0,3));
+    if (fighter.supportsSpin) rows.push(['Spin Dash', 'Mantén abajo + Botón Jet. Suelta abajo para salir']);
+    if (state.full && fighter.characterId === 'rock') rows.push(['Pedir Eddie', 'Aux2 + I']);
+    if (state.full && team.length > 1) {
         const assist = blue?'U':'Apóstrofo';
-        rows.push(['Asistencia / relevo', usingXbox(side)
-            ? 'LB para el personaje 2 · LT para el personaje 3 · toca para asistencia o mantén para relevo'
+        rows.push(['Asistencia / relevo', pad
+            ? (playstation?'L1 para el personaje 2 · L2 para el personaje 3':'LB para el personaje 2 · LT para el personaje 3')+' · toca para asistencia o mantén para relevo'
             : assist+' para el personaje 2 · Abajo + '+assist+' para el personaje 3 · toca para asistencia o mantén para relevo']);
     }
+    const list = document.createElement('dl');
+    const heading = document.createElement('h3');
+    heading.textContent = state.full ? 'Lista de movimientos' : 'Comandos esenciales';
     for (const [name, command] of rows) {
         const term = document.createElement('dt');
         const detail = document.createElement('dd');
         term.textContent = name;
-        const withAux = command.replaceAll('Aux1', blue ? 'Q' : '[').replaceAll('Aux2', blue ? 'E' : ']').replaceAll('Botón Jet', blue ? 'Espacio' : 'Enter');
-        detail.textContent = usingXbox(side) ? xboxCommand(command) : blue ? withAux : withAux.replace(/\b[JIMK]\b/g, key => buttonNames[key]);
+        const withAux = command.replace(/\b(?:Aux1|Aux2|Botón Jet|Espacio|[JIMKQE])\b/g, key => {
+            if (key==='Aux1'||key==='Q') return blue?'Q':'[';
+            if (key==='Aux2'||key==='E') return blue?'E':']';
+            if (key==='Botón Jet'||key==='Espacio') return blue?'Espacio':'Enter';
+            return blue?key:buttonNames[key];
+        });
+        detail.textContent = pad ? xboxCommand(command,side) : withAux;
         list.append(term, detail);
     }
-    panel.append(title, label, list);
+    panel.append(heading,list,button(state.full?'Volver a comandos esenciales':'Ver los demás ataques',()=>{
+        state.full = !state.full;
+        renderPanels(side+'-moves');
+    },'moves'));
     return panel;
+}
+
+function stepRoster(side, delta) {
+    const count = game.teamFighters?.[side]?.length ?? 1;
+    if (count < 2) return;
+    browsingSide = side;
+    panelState[side].index = (panelState[side].index+delta+count)%count;
+    renderPanels(side+(delta<0?'-previous':'-next'));
+}
+
+function renderPanels(focusKey = document.activeElement?.dataset.pauseFocus) {
+    const panels = dialog.querySelector('.pause-panels');
+    if (!panels) return;
+    panels.replaceChildren(playerPanel(game.p1,'p1'),playerPanel(game.p2,'p2'));
+    if (focusKey) panels.querySelector('[data-pause-focus="'+focusKey+'"]')?.focus();
 }
 
 const dialog = document.createElement('dialog');
@@ -184,7 +245,7 @@ export function toggleBattlePause() {
     title.textContent = 'Pausa';
     const resume = document.createElement('button');
     resume.type = 'button';
-    resume.textContent = usingXbox() ? 'Continuar · B' : 'Continuar · Esc';
+    resume.textContent = deviceFor() === 'playstation' ? 'Continuar · ○' : usingXbox() ? 'Continuar · B' : 'Continuar · Esc';
     resume.addEventListener('click', toggleBattlePause);
     header.append(title, resume);
     if(game.mode==='practice'){
@@ -196,12 +257,22 @@ export function toggleBattlePause() {
     }
     const panels = document.createElement('div');
     panels.className = 'pause-panels';
-    panels.append(playerPanel(game.p1, 'p1'), playerPanel(game.p2, 'p2'));
+    for (const state of Object.values(panelState)) Object.assign(state,{index:0,full:false});
+    browsingSide = 'p1';
     dialog.replaceChildren(header, panels);
+    renderPanels();
     dialog.showModal();
 }
 
 dialog.addEventListener('cancel', event => {
     event.preventDefault();
     if (game.paused) toggleBattlePause();
+});
+
+dialog.addEventListener('pause-roster-step',event=>stepRoster(browsingSide,event.detail));
+window.addEventListener('input-device-change',()=>{
+    if (!dialog.open) return;
+    dialog.querySelector('header button').textContent =
+        deviceFor()==='playstation'?'Continuar · ○':usingXbox()?'Continuar · B':'Continuar · Esc';
+    renderPanels();
 });

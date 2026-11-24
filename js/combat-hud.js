@@ -1,4 +1,4 @@
-import { usingXbox } from './input-labels.js';
+import { deviceFor, usingXbox } from './input-labels.js';
 import { canAssist } from './team-assists.js';
 import { ctx, game } from './state.js';
 
@@ -156,7 +156,7 @@ export function drawCombatHud(now,remaining) {
         if(active.characterId==='emerl') labels.push('PODER '+Math.floor(power)+'/'+max);
         if(active.superSilver||active.superSonic||active.isSuperShadow) labels.push('SUPER');
         if(team.length>1) labels.push(usingXbox(side)
-            ? 'LB PERSONAJE 2 · LT PERSONAJE 3 · MANTÉN PARA RELEVO'
+            ? (deviceFor(side)==='playstation'?'L1 PERSONAJE 2 · L2 PERSONAJE 3':'LB PERSONAJE 2 · LT PERSONAJE 3')+' · MANTÉN PARA RELEVO'
             : (right?'’':'U')+' PERSONAJE 2 · ABAJO + '+(right?'’':'U')+' PERSONAJE 3 · MANTÉN PARA RELEVO');
         ctx.fillText(labels.join('  ·  '),right?1254:26,637,560);
     }

@@ -1,5 +1,5 @@
 .battle-pause {
-    width: min(880px, 90vw);
+    width: min(1100px, 94vw);
     max-height: 85vh;
     box-sizing: border-box;
     overflow: auto;
@@ -18,7 +18,7 @@
 .pause-blue { --side: #80caff; }
 .pause-red { --side: #ffa0ad; }
 .pause-panels h2 { margin: 0 0 10px; color: var(--side); font-size: 20px; }
-.battle-pause button, .battle-pause select { padding: 7px 10px; color: #edf4ff; background: #263754; border: 1px solid #718aac; border-radius: 6px; font: inherit; }
+.battle-pause button, .battle-pause select { min-height: 44px; padding: 10px 16px; color: #edf4ff; background: #263754; border: 1px solid #718aac; border-radius: 6px; font: inherit; }
 .battle-pause button { cursor: pointer; }
 .pause-panels dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-bottom: 0; }
 .pause-panels dd { margin: 0; color: #c1d4ef; }
@@ -254,3 +254,7 @@ canvas {
 .stage-clock { margin: 0 0 14px; border: 1px solid #5278a2; border-radius: 8px; }
 .stage-clock button { margin: 3px; }
 .stage-clock button[aria-pressed="true"] { background: #18638a; border-color: #80e6ff; color: #fff; }
+
+.pause-roster { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.pause-panels dl { margin-bottom:18px; }
+.pause-panels h3 { font-size:14px; color:var(--side); }
