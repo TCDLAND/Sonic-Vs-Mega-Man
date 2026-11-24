@@ -251,3 +251,6 @@ canvas {
 .online-room-dialog label { display: grid; gap: 5px; flex: 1; min-width: 180px; color: #b8d4df; font: 700 12px system-ui; }
 .online-room-dialog input { width: 100%; box-sizing: border-box; text-transform: uppercase; }
 .online-spectator { width:min(1200px,94vw); } .online-spectator video { display:block; width:100%; margin-bottom:12px; }
+.stage-clock { margin: 0 0 14px; border: 1px solid #5278a2; border-radius: 8px; }
+.stage-clock button { margin: 3px; }
+.stage-clock button[aria-pressed="true"] { background: #18638a; border-color: #80e6ff; color: #fff; }

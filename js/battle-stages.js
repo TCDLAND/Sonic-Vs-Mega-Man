@@ -21,6 +21,13 @@ export const battleStages = definitions.map(([id, label, src, track]) => {
     return { id, label, image, track, floor, platforms };
 });
 
+export const DEFAULT_ROUND_SECONDS = 99;
+const durations = [99,199,299,null];
+
+export function normalizeRoundSeconds(value) {
+    return durations.includes(value) ? value : DEFAULT_ROUND_SECONDS;
+}
+
 let activePicker;
 let previousPad = { x: 0, y: 0, action: false, back: false };
 
@@ -30,6 +37,25 @@ export function chooseBattleStage(game, start) {
     dialog.setAttribute('aria-label', 'Elegir escenario');
     const heading = document.createElement('h2');
     heading.textContent = 'Elegir escenario';
+    let seconds = normalizeRoundSeconds(game.selectedRoundSeconds);
+    const clock = document.createElement('fieldset');
+    clock.className = 'stage-clock';
+    clock.hidden = game.mode === 'practice';
+    const legend = document.createElement('legend');
+    legend.textContent = 'Duración del combate';
+    clock.append(legend);
+    const timeButtons = durations.map(value => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = value === null ? 'Sin límite' : value + ' s';
+        button.setAttribute('aria-pressed', String(value === seconds));
+        button.onclick = () => {
+            seconds = value;
+            for (const option of timeButtons) option.setAttribute('aria-pressed',String(option===button));
+        };
+        clock.append(button);
+        return button;
+    });
     const grid = document.createElement('div');
     grid.className = 'stage-picker-grid';
     const items = battleStages.map(stage => {
@@ -39,7 +65,9 @@ export function chooseBattleStage(game, start) {
         image.alt = '';
         button.append(image, stage.label);
         button.addEventListener('focus', () => music.play(stage.track));
-        button.onclick = () => { game.battleStage = stage; dialog.close(); start(); };
+        button.onclick = () => { game.battleStage = stage;
+            if (!clock.hidden) game.selectedRoundSeconds = seconds;
+            dialog.close(); start(); };
         grid.append(button);
         return button;
     });
@@ -55,19 +83,25 @@ export function chooseBattleStage(game, start) {
         activePicker = undefined;
         dialog.remove();
     });
+    const choices = [...(clock.hidden ? [] : timeButtons), ...items, back];
+    const move = delta => {
+        const index = choices.indexOf(document.activeElement);
+        choices[(index+delta+choices.length)%choices.length].focus();
+    };
     dialog.addEventListener('keydown', event => {
         const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[event.key];
         if (delta == null) return;
         event.preventDefault();
         event.stopPropagation();
-        items[(items.indexOf(document.activeElement) + delta + items.length) % items.length].focus();
+        move(delta);
     });
     for (const event of ['keydown','keyup']) dialog.addEventListener(event, input => input.stopPropagation());
-    dialog.append(heading, grid, back);
+    dialog.append(heading, clock, grid, back);
     document.body.append(dialog);
     dialog.showModal();
-    activePicker = { items, dialog };
-    items.find((_, i) => battleStages[i].id === game.battleStage?.id)?.focus();
+    activePicker = { choices, move, dialog };
+    (clock.hidden ? items.find((_, i) => battleStages[i].id === game.battleStage?.id) ?? items[0]
+        : timeButtons[durations.indexOf(seconds)]).focus();
 }
 
 export function pollStagePad() {
@@ -78,10 +112,10 @@ export function pollStagePad() {
     const y=Number(Boolean(pad.buttons[13]?.pressed))-Number(Boolean(pad.buttons[12]?.pressed))||axis(pad.axes[1]);
     const action=Boolean(pad.buttons[0]?.pressed), back=Boolean(pad.buttons[1]?.pressed);
     if (activePicker) {
-        const { items, dialog }=activePicker;
+        const { choices, move, dialog }=activePicker;
         const delta=(x!==previousPad.x?x:0)+(y!==previousPad.y?y*3:0);
-        if (delta) items[(items.indexOf(document.activeElement)+delta+items.length)%items.length].focus();
-        if (action&&!previousPad.action&&items.includes(document.activeElement)) document.activeElement.click();
+        if (delta) move(delta);
+        if (action&&!previousPad.action&&choices.includes(document.activeElement)) document.activeElement.click();
         if (back&&!previousPad.back&&dialog.open) dialog.close();
     }
     previousPad={x,y,action,back};

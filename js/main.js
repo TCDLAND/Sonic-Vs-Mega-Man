@@ -466,8 +466,11 @@ function gameLoop(time = performance.now(), render = true) {
         tickReserveHealth(now);
         updateCountdown(now);
         const canFight = game.countdown?.phase === '0' || game.countdown?.phase === 'go';
-        if (canFight && game.mode!=='practice' && game.roundEndsAt === null) game.roundEndsAt = now + (game.tournamentSeconds??99)*1000;
-        const remaining = game.roundEndsAt === null ? (game.tournamentSeconds??99) : Math.max(0, Math.ceil((game.roundEndsAt - now) / 1000));
+        if (canFight && game.roundSeconds !== null && game.roundEndsAt === null) {
+            game.roundEndsAt = now + game.roundSeconds * 1000;
+        }
+        const remaining = game.roundEndsAt === null ? game.roundSeconds :
+            Math.max(0,Math.ceil((game.roundEndsAt - now) / 1000));
         game.cpuAgentP1?.update(p2, p1, canFight);
         game.cpuAgentP2?.update(p1, p2, canFight);
         if (game.teamFighters) {
@@ -621,7 +624,7 @@ function gameLoop(time = performance.now(), render = true) {
         }
 
 
-        drawCombatHud(now, game.mode==='practice'?'∞':remaining);
+        drawCombatHud(now, remaining ?? '∞');
         for (const [fighter,x] of [[p1,34],[p2,916]]) if(fighter.characterId==='wily') {
             ctx.save();
             ctx.fillStyle='#161b2a';

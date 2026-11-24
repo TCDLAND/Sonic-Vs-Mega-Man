@@ -1,3 +1,4 @@
+import { DEFAULT_ROUND_SECONDS, normalizeRoundSeconds } from './battle-stages.js';
 import { resetTeamAssists } from './team-assists.js';
 import { resetWind } from './wind-effects.js';
 import { music } from './music.js';
@@ -141,6 +142,8 @@ export function startBattle(storyMatch) {
     game.winner = null;
     game.winnerName = '';
     game.roundEndsAt = null;
+    game.roundSeconds = game.mode === 'practice' ? null : game.tournamentSeconds ??
+        (game.mode === 'story' ? DEFAULT_ROUND_SECONDS : normalizeRoundSeconds(game.selectedRoundSeconds));
     game.resultReason = null;
     if (teamMatch) {
         game.teamFighters = {

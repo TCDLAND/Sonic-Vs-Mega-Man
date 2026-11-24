@@ -1,6 +1,6 @@
 import { canvas, game } from './state.js';
 import { GAME_STATE } from './config.js';
-import { battleStages, chooseBattleStage } from './battle-stages.js';
+import { battleStages, chooseBattleStage, normalizeRoundSeconds } from './battle-stages.js';
 import { startBattle } from './battle.js';
 
 const P1_TO_P2 = {
@@ -61,6 +61,7 @@ function maybeChooseStage() {
     setStatus('Ambos listos · Jugador 1 elige escenario');
     chooseBattleStage(game, () => {
         send({ type: 'battle-start', stageId: game.battleStage?.id,
+            seconds: game.selectedRoundSeconds,
             p1Index: game.characterSelection.p1Index, p2Index: game.characterSelection.p2Index });
         startBattle();
         setStatus(`En línea · Código para espectadores: ${roomCode}`);
@@ -249,6 +250,7 @@ function handleGuestMessage(message) {
         const stage = battleStages.find(item => item.id === message.stageId);
         if (!stage) { setStatus('El anfitrión eligió un escenario que no cargó en esta versión.'); return; }
         game.battleStage = stage;
+        game.selectedRoundSeconds = normalizeRoundSeconds(message.seconds);
         game.characterSelection.p1Index = message.p1Index;
         game.characterSelection.p2Index = message.p2Index;
         startBattle();
