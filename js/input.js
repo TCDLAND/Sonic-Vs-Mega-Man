@@ -26,9 +26,9 @@ import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, canc
 import { modeOptionAt, resultActionAt } from './menu-screen.js?v=online-3v3-2';
 import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
-import { toggleBattlePause } from './pause-menu.js';
+import { isBattleHelpOpen, toggleBattlePause } from './pause-menu.js?v=online-controls-1';
 import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
-import { openOnlineLobby, handleOnlineSelectionKey, routeOnlineKey } from './online.js?v=online-3v3-2';
+import { openOnlineLobby, handleOnlineSelectionKey, releaseOnlineInputs, routeOnlineKey } from './online.js?v=online-controls-1';
 
 function isHumanInputForCpu(event) {
     if (!event.isTrusted && !event.gamepadInput) return false;
@@ -105,6 +105,7 @@ export function tickAssistKeys(now) {
 export function setupInput() {
     window.addEventListener('blur', () => {
         assistKeys.clear();
+        if (game.mode==='online') { releaseOnlineInputs(); return; }
         for (const fighter of [game.p1, game.p2]) {
             if (!fighter) continue;
             for (const key of Object.keys(fighter.keys)) fighter.keys[key] = false;
@@ -121,6 +122,16 @@ export function setupInput() {
             const red = /^Arrow|^(Comma|Period|Minus|Equal|BracketLeft|BracketRight|Quote|Slash)$/.test(e.code);
             setInputDevice(red && game.mode!=='online' ? 'p2' : 'p1','keyboard');
         }
+        if (game.mode==='online' && (game.gameState===GAME_STATE.BATTLE || isBattleHelpOpen()) && e.code==='Escape' &&
+            (e.isTrusted || e.gamepadInput)) {
+            e.preventDefault();
+            if (!e.repeat) {
+                if (!isBattleHelpOpen()) { assistKeys.clear(); releaseOnlineInputs(); }
+                toggleBattlePause();
+            }
+            return;
+        }
+        if (game.mode==='online' && isBattleHelpOpen() && !e.__onlineForwarded) return;
         if (routeOnlineKey(e)) return;
         if(e.isTrusted && tournamentRunning() && e.code==='Escape') { e.preventDefault();cancelTournament();return; }
         if(e.isTrusted && tournamentSimulationActive()) return;
@@ -657,6 +668,7 @@ export function setupInput() {
     });
 
     window.addEventListener('keyup', (e) => {
+        if (game.mode==='online' && isBattleHelpOpen() && !e.__onlineForwarded) return;
         const assistKey = e.assistSlot == null ? e.code : e.code + e.assistSlot;
         const press = assistKeys.get(assistKey);
         if (press) {

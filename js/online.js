@@ -17,6 +17,7 @@ let statusNode = null;
 let stagePickerOpened = false;
 let inputSequence = 0;
 let roomCode;
+const localHeld = new Map();
 let teamSize = 1;
 const viewers = new Map();
 let broadcast;
@@ -304,6 +305,15 @@ export function openOnlineLobby() { createRoomDialog(); }
 export function onlineRole() { return role; }
 export function isForwardedOnlineKey(event) { return Boolean(event.__onlineForwarded); }
 
+export function releaseOnlineInputs() {
+    for (const {code, slot} of localHeld.values()) {
+        const event = new KeyboardEvent('keyup',{code,bubbles:true,cancelable:true});
+        if (slot===0 || slot===1) Object.defineProperty(event,'assistSlot',{value:slot});
+        window.dispatchEvent(event);
+    }
+    localHeld.clear();
+}
+
 export function routeOnlineKey(event) {
     if (role === 'spectator') return true;
     if (game.mode !== 'online' || !['host', 'guest'].includes(role)) return false;
@@ -318,7 +328,12 @@ export function routeOnlineKey(event) {
     }
     if (!inBattle) return false;
     if (!event.__onlineForwarded && !Object.hasOwn(P1_TO_P2,event.code) && event.code !== 'Escape') return true;
-    if (event.code === 'Escape') { event.preventDefault(); return true; }
+    if (event.code === 'Escape') return false;
+    if (!event.__onlineForwarded) {
+        const key = event.code+':'+(event.assistSlot ?? '');
+        if (event.type==='keydown' && !event.repeat) localHeld.set(key,{code:event.code,slot:event.assistSlot});
+        if (event.type==='keyup') localHeld.delete(key);
+    }
 
     if (role === 'host') {
         if (Object.hasOwn(P1_TO_P2, event.code) && !event.__onlineForwarded && !event.repeat) {

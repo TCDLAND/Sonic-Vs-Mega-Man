@@ -124,11 +124,13 @@ const panelState = {
 let browsingSide = 'p1';
 
 function playerPanel(active, side) {
-    const blue = side === 'p1';
+    const blue = side === 'p1', online = game.mode==='online';
+    const p1Keys = blue || online;
     const state = panelState[side];
     const team = [active,...(game.teamFighters?.[side] ?? []).filter(member=>member!==active)];
     const fighter = team[state.index] ?? active;
-    const pad = usingXbox(side), playstation = deviceFor(side) === 'playstation';
+    const inputSide = online ? 'p1' : side;
+    const pad = usingXbox(inputSide), playstation = deviceFor(inputSide) === 'playstation';
     const panel = document.createElement('section');
     panel.dataset.side = side;
     panel.className = blue ? 'pause-blue' : 'pause-red';
@@ -168,18 +170,18 @@ function playerPanel(active, side) {
     });
     label.append(select);
     panel.append(title);
-    if (state.index===0) panel.append(label);
+    if (state.index===0 && !online) panel.append(label);
 
     const attacks = moves[fighter.characterId] || (fighter.hasBuster ? [['Buster', 'Mantén J y suelta']] : []);
     const rows = state.full ? [
-        ['Mover / saltar / agacharse',pad?'Cruceta o sticks · ↑ salto · ↓ agacharse':blue?'A / D · W · S':'← / → · ↑ · ↓'],
+        ['Mover / saltar / agacharse',pad?'Cruceta o sticks · ↑ salto · ↓ agacharse':p1Keys?'A / D · W · S':'← / → · ↑ · ↓'],
         ['Guardia / dash','Atrás / doble toque de dirección'], ...attacks
     ] : (essentialMoves[fighter.characterId]?.map(index=>attacks[index]).filter(Boolean) ?? attacks.slice(0,3));
     if (fighter.supportsSpin) rows.push(['Spin Dash',
-        (pad ? padSpinChord(side) : 'Abajo + Botón Jet')+'. Suelta abajo para salir']);
+        (pad ? padSpinChord(inputSide) : 'Abajo + Botón Jet')+'. Suelta abajo para salir']);
     if (state.full && fighter.characterId === 'rock') rows.push(['Pedir Eddie', 'Aux2 + I']);
     if (state.full && team.length > 1) {
-        const assist = blue?'U':'Apóstrofo';
+        const assist = p1Keys?'U':'Apóstrofo';
         rows.push(['Asistencia / relevo', pad
             ? (playstation?'L1 para el personaje 2 · L2 para el personaje 3':'LB para el personaje 2 · LT para el personaje 3')+' · toca para asistencia o mantén para relevo'
             : assist+' para el personaje 2 · Abajo + '+assist+' para el personaje 3 · toca para asistencia o mantén para relevo']);
@@ -192,15 +194,15 @@ function playerPanel(active, side) {
         const detail = document.createElement('dd');
         term.textContent = name;
         const withAux = command.replace(/\b(?:Aux1|Aux2|Botón Jet|Espacio|[JIMKQE])\b/g, key => {
-            if (key==='Aux1'||key==='Q') return blue?'Q':'[';
-            if (key==='Aux2'||key==='E') return blue?'E':']';
-            if (key==='Botón Jet'||key==='Espacio') return blue?'Espacio':'Enter';
-            return blue?key:buttonNames[key];
+            if (key==='Aux1'||key==='Q') return p1Keys?'Q':'[';
+            if (key==='Aux2'||key==='E') return p1Keys?'E':']';
+            if (key==='Botón Jet'||key==='Espacio') return p1Keys?'Espacio':'Enter';
+            return p1Keys?key:buttonNames[key];
         });
-        let text = pad ? xboxCommand(command,side) : withAux;
+        let text = pad ? xboxCommand(command,inputSide) : withAux;
         if (pad && fighter.supportsSpin && name !== 'Spin Dash') {
-            const crouchLight = deviceFor(side)==='playstation'?'Abajo + ✕':'Abajo + A';
-            const alternative = deviceFor(side)==='playstation'?'Abajo + R2 + ✕':'Abajo + RT + A';
+            const crouchLight = playstation?'Abajo + ✕':'Abajo + A';
+            const alternative = playstation?'Abajo + R2 + ✕':'Abajo + RT + A';
             text = text.replaceAll(crouchLight,alternative);
         }
         detail.textContent = text;
@@ -233,7 +235,11 @@ dialog.className = 'battle-pause';
 dialog.setAttribute('aria-labelledby', 'battle-pause-title');
 document.body.append(dialog);
 
+export function isBattleHelpOpen() { return dialog.open; }
+
 export function toggleBattlePause() {
+    const online = game.mode === 'online';
+    if (online && dialog.open) { dialog.close(); return; }
     if (game.paused) {
         game.paused = false;
         setCombatPaused(false);
@@ -241,18 +247,20 @@ export function toggleBattlePause() {
         dialog.close();
         return;
     }
-    game.paused = true;
-    setCombatPaused(true);
-    music.pause();
-    clearInputs(game.p1);
-    clearInputs(game.p2);
+    if (!online) {
+        game.paused = true;
+        setCombatPaused(true);
+        music.pause();
+        clearInputs(game.p1);
+        clearInputs(game.p2);
+    }
     const header = document.createElement('header');
     const title = document.createElement('h1');
     title.id = 'battle-pause-title';
-    title.textContent = 'Pausa';
+    title.textContent = online ? 'Controles · La pelea sigue' : 'Pausa';
     const resume = document.createElement('button');
     resume.type = 'button';
-    resume.textContent = deviceFor() === 'playstation' ? 'Continuar · ○' : usingXbox() ? 'Continuar · B' : 'Continuar · Esc';
+    resume.textContent = online ? 'Cerrar controles' : deviceFor() === 'playstation' ? 'Continuar · ○' : usingXbox() ? 'Continuar · B' : 'Continuar · Esc';
     resume.addEventListener('click', toggleBattlePause);
     header.append(title, resume);
     if(game.mode==='practice'){
@@ -265,7 +273,7 @@ export function toggleBattlePause() {
     const panels = document.createElement('div');
     panels.className = 'pause-panels';
     for (const state of Object.values(panelState)) Object.assign(state,{index:0,full:false});
-    browsingSide = 'p1';
+    browsingSide = online && game.onlineRole==='guest' ? 'p2' : 'p1';
     dialog.replaceChildren(header, panels);
     renderPanels();
     dialog.showModal();
@@ -273,13 +281,13 @@ export function toggleBattlePause() {
 
 dialog.addEventListener('cancel', event => {
     event.preventDefault();
-    if (game.paused) toggleBattlePause();
+    if (game.paused || game.mode==='online') toggleBattlePause();
 });
 
 dialog.addEventListener('pause-roster-step',event=>stepRoster(browsingSide,event.detail));
 window.addEventListener('input-device-change',()=>{
     if (!dialog.open) return;
     dialog.querySelector('header button').textContent =
-        deviceFor()==='playstation'?'Continuar · ○':usingXbox()?'Continuar · B':'Continuar · Esc';
+        game.mode==='online'?'Cerrar controles':deviceFor()==='playstation'?'Continuar · ○':usingXbox()?'Continuar · B':'Continuar · Esc';
     renderPanels();
 });

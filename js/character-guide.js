@@ -2,7 +2,7 @@ import { padSpinChord, usingXbox, xboxCommand } from './input-labels.js';
 import { storyRobotGuide } from './story-robot.js';
 import { BUSTER_CONFIGS } from './buster-system.js';
 import { getSelectionRoster } from './selection.js';
-import { moves } from './pause-menu.js';
+import { moves } from './pause-menu.js?v=online-controls-1';
 import { BASS_MOVES, PROTO_MOVES } from './robot-combat.js';
 import { SPIN_PROFILES } from './spin-system.js';
 import { X_SABER, NOVA_DAMAGE } from './x.js';

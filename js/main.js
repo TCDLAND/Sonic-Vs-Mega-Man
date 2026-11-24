@@ -1,6 +1,6 @@
 import { drawCombatHud, tickReserveHealth } from './combat-hud.js';
 import { pollXboxPads } from './xbox-pad.js';
-import { tickAssistKeys } from './input.js?v=online-3v3-2';
+import { tickAssistKeys } from './input.js?v=online-controls-1';
 import { drawTeamAssists, tickTeamAssists, interceptTeamAssist } from './team-assists.js';
 import { drawWind, emitWind } from './wind-effects.js';
 import { pollStagePad } from './battle-stages.js';
@@ -21,7 +21,7 @@ import { storyStage, showStoryResult, pollStoryPad } from './story-mode.js';
 import { bgImage, trebleSprite1, bassSprite3 } from './assets.js';
 import { drawSelectionScreen } from './selection.js';
 import { drawCountdown, drawModeScreen, drawResultScreen } from './menu-screen.js?v=online-3v3-2';
-import { setupInput } from './input.js?v=online-3v3-2';
+import { setupInput } from './input.js?v=online-controls-1';
 import { switchTeamFighter } from './battle.js?v=team3-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';
@@ -649,12 +649,12 @@ function gameLoop(time = performance.now(), render = true) {
         drawOffscreenFighter(p1, '#a9ddff');
         drawOffscreenFighter(p2, '#ff9eb1');
         drawCountdown();
-        if (canFight && game.mode !== 'online') {
+        if (canFight) {
             ctx.save();
             ctx.font = '700 12px system-ui';
             ctx.textAlign = 'center';
             ctx.fillStyle = '#e1efff';
-            ctx.fillText('ESC · PAUSA', canvas.width / 2, 120);
+            ctx.fillText(game.mode==='online'?'ESC · CONTROLES':'ESC · PAUSA', canvas.width / 2, 120);
             ctx.restore();
         }
 
