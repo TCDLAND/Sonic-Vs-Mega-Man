@@ -488,7 +488,7 @@ export function updateEggAssists() {
             delete game.eggAssists[side];
             continue;
         }
-        if (age<265 || assist.hit) continue;
+        if (age<320 || assist.hit) continue;
         if (assist.scrap) {
             assist.reserve.launch({spec:moves.scrap,direction:assist.direction},assist.origin);
             assist.hit=true;
@@ -510,7 +510,7 @@ export function drawEggAssists() {
         const fade=Math.max(0,Math.min(1,age/120,(730-age)/180));
         const {origin,direction}=assist;
         const art=assist.scrap?'shot':'idle';
-        if (!assist.scrap) drawBall(origin,{spec:moves.high,direction},age,fade);
+        if (!assist.scrap && age>=320) drawBall(origin,{spec:moves.high,direction},age,fade);
         const frame=updatedFrame('egg',art,Math.floor(age/47),center(origin),
             origin.y+origin.height,origin.height/39,direction,19,38);
         drawRobotFrame(ctx,frame,game.cameraX,fade);

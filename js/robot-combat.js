@@ -1,3 +1,4 @@
+import { hitTeamAssist } from './team-assists.js';
 import { combatNow } from './combat-clock.js';
 import { dealDamage } from './combat-system.js';
 import { HIGHWAY_WALLS } from './wall-system.js';
@@ -51,7 +52,7 @@ export function hitRobotMove(fighter, receiver, move = fighter.robotMove) {
     if (frame < spec.active[0] || frame > spec.active[1]) return;
     const x = fighter.x + fighter.width / 2, feet = fighter.y + fighter.height;
     const rect = { x: spec.radial || direction < 0 ? x - spec.range : x, y: feet - spec.top, w: spec.radial ? spec.range * 2 : spec.range, h: spec.band ?? spec.top - 12 };
-    if (receiver.handleMeleeVsEddie?.(rect,fighter)) { move.hit=true; return; }
+    if (hitTeamAssist(receiver,fighter,rect,spec.damage) || receiver.handleMeleeVsEddie?.(rect,fighter)) { move.hit=true; return; }
     const hit = receiver.shieldIntersects?.(rect) || (receiver.pixelBodyIntersectsRect
         ? receiver.pixelBodyIntersectsRect(rect, x)
         : rect.x < receiver.x + receiver.width && rect.x + rect.w > receiver.x &&

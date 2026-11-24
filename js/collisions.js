@@ -1,3 +1,4 @@
+import { hitTeamAssist } from './team-assists.js';
 import { combatNow } from './combat-clock.js';
 // ========================================
 // TODAS LAS COLISIONES
@@ -40,7 +41,7 @@ export function checkJabCollision(attacker, receiver) {
     const hitW = 100;
     const hitH = 110;
 
-    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.jabHitDone=true; return; }
+    if (hitTeamAssist(receiver,attacker,{x:hitX,y:hitY,w:hitW,h:hitH},attacker.jabDamage) || receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.jabHitDone=true; return; }
     const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
     if (hitX < rx + rw && hitX + hitW > rx &&
@@ -67,7 +68,7 @@ export function checkHeavyCollision(attacker, receiver) {
     const hitW = 100;
     const hitH = 100;
 
-    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.heavyHitDone=true; return; }
+    if (hitTeamAssist(receiver,attacker,{x:hitX,y:hitY,w:hitW,h:hitH},8) || receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.heavyHitDone=true; return; }
     const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
     if (hitX < rx + rw && hitX + hitW > rx &&
@@ -104,7 +105,7 @@ export function checkKickLightCollision(attacker, receiver) {
     const hitW = 100;
     const hitH = 100;
 
-    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.kickLightHitDone=true; return; }
+    if (hitTeamAssist(receiver,attacker,{x:hitX,y:hitY,w:hitW,h:hitH},attacker.kickLightDamage) || receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.kickLightHitDone=true; return; }
     const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
     if (hitX < rx + rw && hitX + hitW > rx &&
@@ -147,7 +148,7 @@ export function checkKickHeavyCollision(attacker, receiver) {
         return;
     }
 
-    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.kickHeavyHitDone=true; return; }
+    if (hitTeamAssist(receiver,attacker,{x:hitX,y:hitY,w:hitW,h:hitH},attacker.kickHeavyDamageP1) || receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.kickHeavyHitDone=true; return; }
     const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
     if (hitX < rx + rw && hitX + hitW > rx &&

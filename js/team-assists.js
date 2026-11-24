@@ -81,18 +81,31 @@ function fireAssist(assist) {
     });
 }
 
+export function hitTeamAssist(target, attacker, rect, damage, projectile = false) {
+    const side = target === game.p1 ? 'p1' : 'p2';
+    if (game[side] !== target || !attacker || attacker === target ||
+        game.teamFighters?.[side]?.includes(attacker) || !(damage > 0)) return false;
+    const group = [game.teamAssists,game.silverAssist,game.eggAssists].find(item=>item?.[side]);
+    const assist = group?.[side];
+    if (!assist || assist.active !== target) return false;
+    const reserve = assist.reserve ?? assist.silver;
+    const age = combatNow()-assist.started;
+    if (age < 45 || age >= 700) return false;
+    const centerX = assist.origin ? assist.origin.x + assist.origin.width/2 :
+        assist.silver ? assist.x-assist.dir*58*(1-Math.min(1,age/168)) : assist.x;
+    const foot = assist.origin ? assist.origin.y+assist.origin.height : assist.floor ?? assist.y;
+    const half = reserve.width*.29;
+    if (rect.x >= centerX+half || rect.x+rect.w <= centerX-half ||
+        rect.y >= foot || rect.y+rect.h <= foot-reserve.height*.78) return false;
+    delete group[side];
+    dealDamage(reserve,damage,{attacker,attackName:'Castigo de asistencia',projectile,impactX:rect.x});
+    return true;
+}
+
 export function interceptTeamAssist(projectile,target) {
     if (!projectile.active || projectile.collisionDisabled) return false;
-    const side=target===game.p1?'p1':'p2';
-    const a=game.teamAssists?.[side];
-    if (!a || a.active!==target || a.reserve===projectile.owner) return false;
-    const age=combatNow()-a.started;
-    const bounds={x:a.x-a.reserve.width*.29,y:a.floor-a.reserve.height*.78,
-        w:a.reserve.width*.58,h:a.reserve.height*.78};
-    if (age<90 || age>670 || projectile.x>=bounds.x+bounds.w || projectile.x+projectile.width<=bounds.x ||
-        projectile.y>=bounds.y+bounds.h || projectile.y+projectile.height<=bounds.y) return false;
-    dealDamage(a.reserve,projectile.damage,{attacker:projectile.owner,attackName:'Impacto a una asistencia',projectile:true});
-    delete game.teamAssists[side];
+    const {x,y,width:w,height:h}=projectile;
+    if (!hitTeamAssist(target,projectile.owner,{x,y,w,h},projectile.damage,true)) return false;
     projectile.active=false;
     return true;
 }
@@ -107,11 +120,11 @@ export function tickTeamAssists() {
         }
         if(a.spec.shot) {
             const limit=a.spec.burst?3:1;
-            if(a.phase<limit && age>=275+a.phase*115) { fireAssist(a); a.phase++; }
+            if(a.phase<limit && age>=320+a.phase*95) { fireAssist(a); a.phase++; }
             continue;
         }
         if (age>=160 && age<450 && a.spec.step) a.x=clamp(a.x+a.direction*a.spec.step,270,2320);
-        if (a.phase || age<248 || age>=495) continue;
+        if (a.phase || age<320 || age>=495) continue;
         const gap=(center(target)-a.x)*a.direction;
         if(gap< -45 || gap>a.spec.reach || target.getCurrentY()+target.getCurrentHeight()<a.floor-115) continue;
         a.phase=1;

@@ -654,15 +654,7 @@ export function handleSilverAssistShot(shot,target) {
     const assist=game.silverAssist?.[side];
     if (!assist || assist.active!==target || !shot.active || !assist.silver.fieldIntersects(shot,assist)) return false;
     const age=combatNow()-assist.started;
-    if (age<82 || age>=725) return false;
-    if (!assist.push && assist.silver.interceptSilverShot(shot,assist)) return true;
-    // Durante la entrada o recuperación Silver ya es visible y puede recibir el disparo.
-    if (assist.hitShots?.has(shot)) return false;
-    assist.hitShots??=new WeakSet();
-    assist.hitShots.add(shot);
-    dealDamage(assist.silver,shot.damage,{attacker:shot.owner,attackName:shot.type,projectile:true,impactX:shot.x});
-    if (age>=180) {shot.active=false;return true;}
-    return false;
+    return !assist.push && age>=320 && age<690 && assist.silver.interceptSilverShot(shot,assist);
 }
 
 export function updateSilverAssists() {
@@ -672,19 +664,11 @@ export function updateSilverAssists() {
         if (!assist) continue;
         const age=combatNow()-assist.started;
         if (age>=850 || assist.silver.health<=0 || game[side]!==assist.active) {delete game.silverAssist[side];continue;}
-        if (assist.push && age>=305 && !assist.sent) {
+        if (assist.push && age>=320 && !assist.sent) {
             assist.sent=true;
             createShot(assist.silver,'wave',assist.dir,assist.x+assist.dir*40,assist.y-82);
         }
-        const target=game[side==='p1'?'p2':'p1'];
-        const melee=target.robotMove??target.sonicMove;
-        if (age>=100 && age<700 && !assist.meleeHit &&
-            (target.isJabActive || target.isKickHeavyActive || target.isHeavyActive ||
-                (melee?.spec.active && Math.floor((combatNow()-melee.started)/melee.spec.ms)>=melee.spec.active[0])) &&
-            Math.abs(middle(target)-assist.x)<94 && foot(target)>assist.y-105) {
-            assist.meleeHit=true;
-            dealDamage(assist.silver,8,{attacker:target,attackName:'Interrupción de asistencia'});
-        }
+
     }
 }
 
@@ -696,6 +680,6 @@ export function drawSilverAssists() {
         const key=assist.push?'push':'field';
         const gold=assist.silver.superSilver;
         drawRobotFrame(ctx,silverFrame(key,Math.floor(age/96),x,assist.y,assist.silver.height/44,assist.dir,gold),game.cameraX,fade);
-        if (!assist.push) drawFieldPortal(assist.x,assist.y-73,age-180,370);
+        if (!assist.push) drawFieldPortal(assist.x,assist.y-73,age-320,370);
     }
 }
