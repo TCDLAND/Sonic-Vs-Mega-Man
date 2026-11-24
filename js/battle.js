@@ -82,7 +82,7 @@ export function createFighter(character, x, y, controls) {
 }
 
 export function applyBattleControllers() {
-    const defaults = { p1: game.mode === 'ai', p2: !['local','practice'].includes(game.mode) };
+    const defaults = { p1: game.mode === 'ai', p2: !['local','practice','online'].includes(game.mode) };
     for (const side of ['p1', 'p2']) {
         const slot = side === 'p1' ? 'cpuAgentP1' : 'cpuAgentP2';
         const enabled = game.controlOverrides?.[side] ?? defaults[side];

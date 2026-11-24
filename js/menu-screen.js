@@ -103,17 +103,22 @@ export function drawModeScreen() {
     ctx.fillStyle='rgba(255,255,255,.62)';
     ctx.font='600 13px system-ui, sans-serif';
     ctx.fillText('A / D o ← / → PARA CAMBIAR     •     J / , / ENTER PARA ELEGIR', W / 2, 703);
-    rounded(260, 637, 310, 40, 9, '#162945', '#83c9ff', 2);
+    rounded(145, 637, 300, 40, 9, '#162945', '#83c9ff', 2);
     ctx.fillStyle = '#e4f6ff';
     ctx.font = '800 15px system-ui';
-    ctx.fillText('GUÍA DE PERSONAJES  ·  G',415,663);
-    rounded(710,637,310,40,9,'#3d265d',game.modeCursor===5?'#dec1ff':'#9070c0',game.modeCursor===5?4:2);
-    ctx.fillStyle='#f5e5ff';ctx.fillText('TORNEOS Y SIMULACIÓN',865,663);
+    ctx.fillText('GUÍA DE PERSONAJES  ·  G',295,663);
+    rounded(490,637,300,40,9,'#123c45',game.modeCursor===6?'#79ffe1':'#4ca598',game.modeCursor===6?4:2);
+    ctx.fillStyle='#d7fff6';ctx.fillText('ONLINE · SALA 1v1',640,663);
+    rounded(835,637,300,40,9,'#3d265d',game.modeCursor===5?'#dec1ff':'#9070c0',game.modeCursor===5?4:2);
+    ctx.fillStyle='#f5e5ff';ctx.fillText('TORNEOS Y SIMULACIÓN',985,663);
     ctx.textAlign = 'left';
 }
 
 export function modeOptionAt(x, y) {
-    if (x>=710 && x<=1020 && y>=637 && y<=677) return 5;
+    if (y>=637 && y<=677) {
+        if(x>=490&&x<=790)return 6;
+        if(x>=835&&x<=1135)return 5;
+    }
     if (x >= 465 && x <= 815 && y >= 185 && y <= 244) return 3;
     if (y>=540 && y<=626) {
         if(x>=170 && x<=615) return 2;

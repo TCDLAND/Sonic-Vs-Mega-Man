@@ -9,6 +9,8 @@ export const game = {
     gameState: GAME_STATE.MODE,
     mode: 'cpu',
     modeCursor: 0,
+    onlineRole: null,
+    onlineStatus: '',
     countdown: null,
     paused: false,
     controlOverrides: null,

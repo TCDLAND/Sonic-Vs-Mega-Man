@@ -314,8 +314,14 @@ function drawSide(player) {
     ctx.fillStyle = confirmed ? '#a7ffc4' : 'rgba(255,255,255,.78)';
     ctx.font = '700 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(isP1 ? 'MOVER: A / D / W / S' : 'MOVER: FLECHAS', isP1 ? 474 : 841, 641);
-    ctx.fillText(isP1 ? 'CONFIRMAR: J' : 'CONFIRMAR: ,', isP1 ? 474 : 841, 657);
+    if (game.mode === 'online') {
+        const ownsSide = (game.onlineRole === 'host' && isP1) || (game.onlineRole === 'guest' && !isP1);
+        ctx.fillText(ownsSide ? 'TÚ: MOVER A / D / W / S' : 'RIVAL EN LÍNEA', isP1 ? 474 : 841, 641);
+        ctx.fillText(ownsSide ? 'CONFIRMAR: J' : 'ESPERANDO SELECCIÓN', isP1 ? 474 : 841, 657);
+    } else {
+        ctx.fillText(isP1 ? 'MOVER: A / D / W / S' : 'MOVER: FLECHAS', isP1 ? 474 : 841, 641);
+        ctx.fillText(isP1 ? 'CONFIRMAR: J' : 'CONFIRMAR: ,', isP1 ? 474 : 841, 657);
+    }
 }
 
 export function drawSelectionScreen() {
@@ -330,7 +336,7 @@ export function drawSelectionScreen() {
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(225,235,255,.75)';
     ctx.font = '600 13px system-ui, sans-serif';
-    ctx.fillText('ELIGE TUS LUCHADORES  •  ESC PARA VOLVER A MODOS', W / 2, 72);
+    ctx.fillText(game.mode === 'online' ? 'JUGADOR 1 CREA LA SALA  •  JUGADOR 2 SE UNE CON EL CÓDIGO' : 'ELIGE TUS LUCHADORES  •  ESC PARA VOLVER A MODOS', W / 2, 72);
     ctx.restore();
 
     drawSide(1);
@@ -349,7 +355,9 @@ export function drawSelectionScreen() {
     ctx.textAlign = 'center';
     ctx.fillStyle = ready ? '#9bffc4' : '#fff';
     ctx.font = '900 13px system-ui, sans-serif';
-    const controlsText = game.mode === 'ai'
+    const controlsText = game.mode === 'online'
+        ? (game.onlineRole === 'host' ? 'ERES JUGADOR 1 · WASD + JIKM · ESPERANDO A TU RIVAL' : 'ERES JUGADOR 2 · USA WASD + JIKM COMO EL JUGADOR 1')
+        : game.mode === 'ai'
         ? 'CONFIGURA IA AZUL Y ROJA: P1  A / D / W / S + J     •     P2  FLECHAS + ,'
         : ['cpu', 'team'].includes(game.mode)
         ? (game.mode === 'team' ? `AZUL ${game.teamRosters[0].length}/3  •  CPU ${game.teamRosters[1].length}/3  •  ELIGE SEIS DISTINTOS` : 'TÚ: WASD + J  •  RIVAL: FLECHAS + COMA')

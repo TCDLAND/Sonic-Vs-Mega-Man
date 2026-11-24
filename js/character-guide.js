@@ -72,7 +72,7 @@ dialog.setAttribute('aria-labelledby', 'guide-title');
 document.body.append(dialog);
 
 export function isCharacterGuideOpen() { return dialog.open; }
-export function guideButtonAt(x, y) { return x >= 260 && x <= 570 && y >= 637 && y <= 677; }
+export function guideButtonAt(x, y) { return x >= 145 && x <= 445 && y >= 637 && y <= 677; }
 
 function element(tag, value, className) {
     const node = document.createElement(tag);

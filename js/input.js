@@ -27,6 +27,7 @@ import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
 import { toggleBattlePause } from './pause-menu.js';
 import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
+import { openOnlineLobby, handleOnlineSelectionKey, routeOnlineKey } from './online.js';
 
 function isHumanInputForCpu(event) {
     if (!event.isTrusted) return false;
@@ -64,6 +65,7 @@ function confirmFighter(side) {
 
 function chooseMode(index) {
     if (index === 5) { openTournamentMenu(); return; }
+    if (index === 6) { openOnlineLobby(); return; }
     if (index === 3) { openStoryCampaigns(); return; }
     game.controlOverrides = null;
     game.modeCursor = index;
@@ -102,6 +104,7 @@ export function setupInput() {
         }
     });
     window.addEventListener('keydown', (e) => {
+        if (routeOnlineKey(e)) return;
         if(e.isTrusted && tournamentRunning() && e.code==='Escape') { e.preventDefault();cancelTournament();return; }
         if(e.isTrusted && tournamentSimulationActive()) return;
         music.unlock();
@@ -121,8 +124,8 @@ export function setupInput() {
         if (game.gameState === GAME_STATE.MODE) {
             if(tournamentRunning()) return;
             if (e.code === 'KeyG' && !e.repeat) { openCharacterGuide(); return; }
-            if (!e.repeat && ['KeyA', 'ArrowLeft'].includes(e.code)) game.modeCursor = (game.modeCursor + 5) % 6;
-            if (!e.repeat && ['KeyD', 'ArrowRight'].includes(e.code)) game.modeCursor = (game.modeCursor + 1) % 6;
+            if (!e.repeat && ['KeyA', 'ArrowLeft'].includes(e.code)) game.modeCursor = (game.modeCursor + 6) % 7;
+            if (!e.repeat && ['KeyD', 'ArrowRight'].includes(e.code)) game.modeCursor = (game.modeCursor + 1) % 7;
             if (!e.repeat && ['KeyJ', 'Comma', 'Space', 'Enter'].includes(e.code)) chooseMode(game.modeCursor);
             return;
         }
@@ -137,6 +140,7 @@ export function setupInput() {
         // SELECCIÓN
         // ============================
         if (game.gameState === GAME_STATE.SELECT) {
+            if (handleOnlineSelectionKey(e)) return;
             if (e.code === 'KeyR' && !e.repeat && canRandomizeSelection()) {
                 startRandomBattle();
                 return;
@@ -635,6 +639,7 @@ export function setupInput() {
     });
 
     window.addEventListener('keyup', (e) => {
+        if (routeOnlineKey(e)) return;
         if (sonicWalkKey(e, false) || adventureKey(e, false)) return;
         if (game.paused) return;
         if (game.gameState === GAME_STATE.BATTLE && game.p1 && game.p2 && isHumanInputForCpu(e)) return;
@@ -712,11 +717,13 @@ export function setupInput() {
     canvas.addEventListener('pointermove', (e) => {
         const p = canvasPoint(e);
         if (game.gameState === GAME_STATE.MODE) {
+            if (guideButtonAt(p.x, p.y)) return;
             const mode = modeOptionAt(p.x, p.y);
             if (mode >= 0) game.modeCursor = mode;
             return;
         }
         if (game.gameState !== GAME_STATE.SELECT) return;
+        if (game.mode === 'online') return;
         const s = game.characterSelection;
         const p1Index = selectionIndexAt(p.x, p.y, 1);
         const p2Index = selectionIndexAt(p.x, p.y, 2);
@@ -741,6 +748,7 @@ export function setupInput() {
             return;
         }
         if (game.gameState !== GAME_STATE.SELECT) return;
+        if (game.mode === 'online') return;
         if (randomSelectionAt(p.x, p.y)) {
             startRandomBattle();
             return;

@@ -807,6 +807,17 @@ function gameLoop(time = performance.now(), render = true) {
         drawResultScreen();
     }
 
+    if (render && game.mode === 'online' && game.onlineStatus) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(5,14,27,.84)';
+        ctx.fillRect(380, 8, 520, 25);
+        ctx.fillStyle = '#a7ffe5';
+        ctx.font = '700 12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(game.onlineStatus, 640, 25, 500);
+        ctx.restore();
+    }
+
 }
 
 function frameDriver(time) {
