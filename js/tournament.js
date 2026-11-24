@@ -1,0 +1,420 @@
+import { game } from './state.js';
+import { GAME_STATE } from './config.js';
+import { combatNow, setSimulatedCombatTime } from './combat-clock.js';
+import { startBattle } from './battle.js';
+import { battleStages } from './battle-stages.js';
+import { music } from './music.js';
+import { addWinDamage, beginTournamentDamage, endTournamentDamage } from './tournament-damage.js';
+
+const statsKey='svmm-tournament-results-v1';
+const TURN_SECONDS=99;
+const SIM_SECONDS=28;
+let current, overlay;
+
+function loadStats() {
+    try {
+        const data=JSON.parse(localStorage.getItem(statsKey));
+        if (data?.version===1) return data;
+    } catch {}
+    return {version:1,fighters:{},matchups:{},teams:{},completed:{singles:0,teams:0},recent:[]};
+}
+let stats=loadStats();
+
+function shuffle(values) {
+    const result=[...values];
+    for(let i=result.length-1;i>0;i--) {
+        const j=Math.floor(Math.random()*(i+1));
+        [result[i],result[j]]=[result[j],result[i]];
+    }
+    return result;
+}
+function poolList(){return [...game.characterSelection.chars];}
+function keyOf(entry){return entry.roster.join(' + ');}
+function randomRoster(size,pool){ return shuffle(pool).slice(0,size); }
+
+export function buildBracket(entries) {
+    const size=2**Math.ceil(Math.log2(entries.length));
+    const playIns=entries.length-size/2;
+    let pairs=[],idx=0;
+    for(let i=0;i<size/2;i++) {
+        const needPair=Math.floor((i+1)*playIns/(size/2))>Math.floor(i*playIns/(size/2));
+        pairs.push([entries[idx++],needPair?entries[idx++]:null]);
+    }
+    return pairs;
+}
+function createEntries(state) {
+    const pool=poolList();
+    const player=state.playerRoster;
+    if(state.kind==='roster') return shuffle(pool).map(id=>({roster:[id],human:player?.[0]===id}));
+    const poolWithoutPlayer=player?pool.filter(id=>!player.includes(id)):pool;
+    let singles=[];
+    if(state.teamSize===1) {
+        while(singles.length<state.size) singles.push(...shuffle(poolWithoutPlayer));
+    }
+    return shuffle(Array.from({length:state.size},(_,i)=>{
+        if(i===0&&player) return {roster:player,human:true};
+        const source=poolWithoutPlayer.length>=state.teamSize?poolWithoutPlayer:pool;
+        return {roster:state.teamSize===1?[singles.pop()]:randomRoster(state.teamSize,source),human:false};
+    }));
+}
+function newBracket() {
+    current.round=1;
+    current.pairs=buildBracket(createEntries(current));
+    current.advancers=[];
+    current.bracketMatch=0;
+}
+function persist() {
+    try { localStorage.setItem(statsKey,JSON.stringify(stats)); }
+    catch { if(current) current.storageFailed=true; }
+}
+function record(a,b,winner,reason) {
+    const aKey=keyOf(a),bKey=keyOf(b);
+    const elapsed=Math.round((combatNow()-current.matchAt)/1000);
+    const defeated=winner==='p1'?game.p2:game.p1;
+    const damage=endTournamentDamage(winner,reason,defeated);
+    if(a.human||b.human) return;
+    const isLab = current.kind==='roundRobin';
+    const report = isLab
+        ? stats.roundRobin ??= {fighters:{},matchups:{},teams:{},recent:[],completedBatches:0,tools:{},mirrors:{}}
+        : stats;
+    if (isLab) {
+        const endings = report.endings ??= {};
+        endings[reason]=(endings[reason]??0)+1;
+        const tools = {p1:game.cpuAgentP1?.actionCounts ?? {},p2:game.cpuAgentP2?.actionCounts ?? {}};
+        for (const [side,id] of [['p1',aKey],['p2',bKey]]) {
+            const counts = report.tools[id] ??= {};
+            for (const [action,total] of Object.entries(tools[side])) counts[action]=(counts[action]??0)+total;
+            const uses = (report.toolUses ??= {})[id] ??= {};
+            for (const [tool,total] of Object.entries(damage[side].toolUses)) uses[tool]=(uses[tool]??0)+total;
+        }
+        if (aKey===bKey) {
+            const mirror=report.mirrors[aKey]??={blueWins:0,redWins:0,draws:0,lowDamage:0};
+            mirror[winner==='draw'?'draws':winner==='p1'?'blueWins':'redWins']++;
+            const totalDamage=[...damage.p1.attacks,...damage.p2.attacks].reduce((sum,hit)=>sum+hit.damage,0);
+            if (reason==='time' && totalDamage<15) mirror.lowDamage++;
+        }
+        damage.cpuActions = tools;
+    }
+    const tally=winner==='draw'?null:winner==='p1'?aKey:bKey;
+    const table=current.teamSize===1?report.fighters:report.teams;
+    for(const [side,id] of isLab && aKey===bKey?[]:[['p1',aKey],['p2',bKey]]) {
+        const row=table[id]??={wins:0,losses:0,draws:0};
+        row[tally===null?'draws':winner===side?'wins':'losses']++;
+    }
+    if(current.teamSize===1 && (!isLab || aKey!==bKey)) {
+        for(const [actor,enemy,side] of [[aKey,bKey,'p1'],[bKey,aKey,'p2']]) {
+            const row=report.matchups[actor]??={};
+            const entry=row[enemy]??={wins:0,losses:0,draws:0};
+            entry[tally===null?'draws':winner===side?'wins':'losses']++;
+        }
+    }
+    if (damage && tally !== null && current.teamSize===1 && (!isLab || aKey!==bKey)) {
+        const byFighter = report.winDamage ??= {};
+        const row = byFighter[tally] ??= {
+            trackedWins: 0, winsWithoutLeadingCategory: 0, winsLedBy: {}, attacks: {}, finishingAttacks: {}
+        };
+        addWinDamage(row, damage[winner].attacks, damage.finishingHit);
+    }
+    report.recent.push({blue:aKey,red:bKey,winner:tally,winnerSide:winner,reason,seconds:elapsed,damage});
+    if(report.recent.length>(isLab?60:150))report.recent.shift();
+    persist();
+}
+function showStatus() {
+    if(!overlay || !current)return;
+    const {status,next,bracket}=overlay;
+    const isLab=current.kind==='roundRobin';
+    status.textContent=(isLab?'Todos contra todos · '+current.matches+'/'+(current.pairs.length*current.total)+' combates'
+        :'Torneo '+(current.finished+1)+'/'+current.total+' · ronda '+current.round
+        +' · '+current.matches+' combates')
+        +(current.activePair?' · '+current.activePair.map(keyOf).join(' vs. '):'')
+        +(current.storageFailed?' · Sesión sin guardar':'');
+    next.hidden=!current.waiting;
+    if (!isLab) bracket.textContent=current.pairs.map(([a,b])=>b?keyOf(a)+' vs. '+keyOf(b):keyOf(a)+' · pasa de ronda').join('\n')
+        || 'Último cruce de la ronda';
+}
+function launch([first,second],swap=false) {
+    const pair=swap?[second,first]:[first,second];
+    current.activePair=pair;
+    current.waiting=false;
+    game.battleStage=battleStages[0];
+    game.mode=current.teamSize===3?'team':'cpu';
+    game.controlOverrides={p1:!pair[0].human,p2:!pair[1].human};
+    startBattle({rosters:pair.map(entry=>entry.roster),isolateCpu:current.simulate});
+    if (pair.every(entry=>!entry.human)) beginTournamentDamage(game.teamFighters);
+    game.tournamentSeconds=current.simulate?SIM_SECONDS:TURN_SECONDS;
+    if(current.simulate) {
+        for(const fighter of [game.p1,game.p2]) {
+            fighter.isIntroActive=false;fighter.introDone=true;
+            if(fighter.state==='intro') fighter.setState?.('idle');
+        }
+        game.countdown={phase:'go',phaseStartedAt:combatNow()};
+    } else music.play(game.battleStage.track);
+    current.matchAt=combatNow();
+    showStatus();
+}
+function advance() {
+    if(!current || current.activePair)return;
+    while(current.pairs.length) {
+        const pair=current.pairs.shift();
+        if(pair[1]) { launch(pair,pair[1].human || !pair[0].human&&Math.random()<.5); return; }
+        current.advancers.push(pair[0]);
+    }
+    if(current.advancers.length===1) {
+        const champion=current.advancers[0];
+        if(current.simulate) {
+            stats.completed[current.teamSize===1?'singles':'teams']++;
+            const table=current.teamSize===1?stats.fighters:stats.teams;
+            const row=table[keyOf(champion)]??={wins:0,losses:0,draws:0};
+            row.titles=(row.titles||0)+1;
+            persist();
+        }
+        current.finished++;
+        if(current.finished>=current.total) {finish('Campeón: '+keyOf(champion));return;}
+        newBracket();
+        advance();
+        return;
+    }
+    current.pairs=buildBracket(current.advancers);
+    current.advancers=[];
+    current.round++;
+    advance();
+}
+export function tournamentResult(winner,reason) {
+    if(!current?.activePair)return false;
+    const pair=current.activePair;
+    record(...pair,winner,reason);
+    current.matches++;
+    if (current.kind==='roundRobin') {
+        if(current.matches===current.pairs.length*current.total) {
+            stats.roundRobin.completedBatches++;
+            persist();
+            finish('Todos contra todos completo');
+        } else launch(current.pairs[current.matches%current.pairs.length]);
+        return true;
+    }
+    if(winner==='draw' && !current.replaying) {
+        current.replaying=true; launch(pair,true); return true;
+    }
+    // Both draws are kept in the statistics. This only selects the advancing entry.
+    const idx=winner==='draw'?Number(Math.random()<.5):winner==='p2'?1:0;
+    current.advancers.push(pair[idx]);
+    current.activePair=null;
+    current.replaying=false;
+    if(current.simulate) advance();
+    else {
+        current.waiting=true;
+        game.gameState=GAME_STATE.MODE;
+        showStatus();
+    }
+    return true;
+}
+function finish(message) {
+    const done=current;
+    current=null;
+    endTournamentDamage();
+    setSimulatedCombatTime(null);
+    game.tournamentSeconds=null;
+    game.isolateCpu=false;
+    game.controlOverrides=null;
+    game.quietSimulation=false;
+    game.gameState=GAME_STATE.MODE;
+    if(overlay) {overlay.box.remove();overlay=null;}
+    music.stop();
+    showReport(message+(done?.simulate?' · '+done.matches+' combates':''),done?.kind==='roundRobin');
+}
+
+export function tournamentSimulationActive(){return Boolean(current?.simulate);}
+export function tournamentSimulationPaused(){return Boolean(current?.paused);}
+export function tournamentRunning(){return Boolean(current);}
+export function tournamentWaiting(){return Boolean(current?.waiting);}
+export function cancelTournament(){if(current)finish('Torneo detenido');}
+export function interruptTournamentSimulation(error){
+    if(!current?.simulate)return;
+    const [blue,red]=current.activePair?.map(keyOf) ?? [];
+    stats.lastSimulationError={
+        format:current.kind, match:current.matches+1, blue, red,
+        message:error instanceof Error?error.message:String(error)
+    };
+    persist();
+    finish('Simulación detenida en el combate '+(current.matches+1)+
+        (blue&&red?' · '+blue+' vs. '+red:''));
+}
+export function startTournament(options) {
+    if(current)return;
+    current={...options,finished:0,matches:0};
+    if(current.simulate) setSimulatedCombatTime(combatNow());
+    const box=document.createElement('aside');
+    box.className='tournament-status';
+    const status=document.createElement('span');
+    const next=document.createElement('button');next.textContent='Continuar';next.onclick=advance;
+    const stop=document.createElement('button');stop.textContent='Detener';stop.onclick=cancelTournament;
+    const details=document.createElement('details'),summary=document.createElement('summary'),bracket=document.createElement('pre');
+    summary.textContent='Cuadro de esta ronda';details.append(summary,bracket);
+    box.append(status,next,stop,details);document.body.append(box);
+    overlay={box,status,next,bracket};
+    if (options.kind==='roundRobin') {
+        game.quietSimulation=true;
+        music.stop();
+        const pause=button('Pausar',()=>{
+            current.paused=!current.paused;
+            pause.textContent=current.paused?'Reanudar':'Pausar';
+        });
+        box.insertBefore(pause,stop);
+        const entries=options.roster.map(id=>({roster:[id]}));
+        current.pairs=entries.flatMap((a,i)=>entries.slice(i).flatMap(b=>a===b?
+            options.mirrors?[[a,b]]:[]:[[a,b],[b,a]]));
+        details.hidden=true;
+        launch(current.pairs[0]);
+    } else {
+        newBracket();
+        advance();
+    }
+}
+export function tournamentStats(){
+    const report = structuredClone(stats);
+    for (const row of [...Object.values(report.winDamage ?? {}),...Object.values(report.roundRobin?.winDamage ?? {})]) {
+        row.winPercentByLeadingCategory = Object.fromEntries(Object.entries(row.winsLedBy).map(
+            ([category, wins]) => [category, Math.round(1000 * wins / row.trackedWins) / 10]
+        ));
+    }
+    return report;
+}
+function downloadStats() {
+    const blob=new Blob([JSON.stringify(tournamentStats(),null,2),'\n'],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');link.href=url;link.download='resultados-torneo.json';link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function makeDialog(title) {
+    const d=document.createElement('dialog');d.className='tournament-dialog';
+    const h=document.createElement('h2');h.textContent=title;d.append(h);
+    d.addEventListener('close',()=>d.remove());
+    for(const name of ['keydown','keyup']) d.addEventListener(name,event=>event.stopPropagation());
+    document.body.append(d);
+    return d;
+}
+function button(text,click) {
+    const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=click;return b;
+}
+function addSelect(box,label,choices) {
+    const field=document.createElement('label');field.textContent=label;
+    const select=document.createElement('select');
+    select.replaceChildren(...choices.map(([key,title])=>new Option(title,key)));
+    field.append(select);box.append(field);return select;
+}
+function showReport(message, showLab = false) {
+    const d=makeDialog(message||'Resultados de la CPU');
+    const data=document.createElement('pre');
+    const rank=(table)=>Object.entries(table).sort((a,b)=>{
+        const ratio=s=>s.wins/Math.max(1,s.wins+s.losses+s.draws);
+        return ratio(b[1])-ratio(a[1])||b[1].wins-a[1].wins;
+    });
+    const classification=table=>rank(table).map(([id,s])=>
+        id.padEnd(13)+' '+s.wins+' G / '+s.losses+' P / '+s.draws+' E · '+(s.titles||0)+' títulos').join('\n')
+        || 'Todavía no hay resultados en este formato.';
+    const match=addSelect(d,'Resultados',[
+        ['','Clasificación 1v1'],['teams','Clasificación 3v3'],
+        ...(stats.roundRobin ? [['roundRobin','Todos contra todos']] : []),
+        ...Object.keys(stats.matchups).sort().map(id=>[id,'Cruces · '+id])
+    ]);
+    match.onchange=()=>{
+        if (match.value==='roundRobin') {
+            const {fighters,mirrors,completedBatches,endings}=stats.roundRobin;
+            data.textContent=['Lotes completos: '+completedBatches,
+                'Por nocaut: '+(endings?.ko??0)+' · Por tiempo: '+(endings?.time??0),classification(fighters),'',
+                'Espejos · azul / rojo / empate · por tiempo con menos de 15 PV de daño',
+                ...Object.entries(mirrors).map(([id,s])=>id+' · '+s.blueWins+' / '+s.redWins+' / '+s.draws+' · '+s.lowDamage)
+            ].join('\n');
+            return;
+        }
+        if (!match.value || match.value==='teams') {
+            data.textContent=classification(match.value==='teams'?stats.teams:stats.fighters);
+            return;
+        }
+        const fighter = match.value;
+        const row = stats.winDamage?.[fighter];
+        const lines = Object.entries(stats.matchups[fighter]).map(([id,v])=>
+            id.padEnd(13)+' '+v.wins+' G / '+v.losses+' P / '+v.draws+' E');
+        if (row) {
+            lines.push('', 'Victorias con daño registrado: '+row.trackedWins);
+            for (const [category,wins] of Object.entries(row.winsLedBy).sort((a,b)=>b[1]-a[1])) {
+                lines.push('Mayor daño de '+category+': '+wins+'/'+row.trackedWins+' ('+
+                    (100*wins/row.trackedWins).toFixed(1)+' %)');
+            }
+        }
+        data.textContent=lines.join('\n');
+    };
+    if (showLab && stats.roundRobin) match.value='roundRobin';
+    match.onchange();
+    d.append(data,button('Descargar resultados JSON',downloadStats),button('Cerrar',()=>d.close()));
+    d.showModal();
+}
+
+function openRoundRobinMenu() {
+    const d=makeDialog('Todos contra todos');
+    const pool=poolList();
+    const size=addSelect(d,'Luchadores',[['4','Elegir 4'],['8','Elegir 8'],['all','Todos ('+pool.length+')']]);
+    const grid=document.createElement('div');grid.className='tournament-roster';d.append(grid);
+    const checked=pool.map((id,i)=>{
+        const field=document.createElement('label');
+        const input=document.createElement('input');
+        input.type='checkbox';input.checked=i<4;
+        field.append(input,' '+id);grid.append(field);
+        return {id,input,field};
+    });
+    size.onchange=()=>{for (const item of checked) item.field.hidden=size.value==='all';};
+    const repeat=addSelect(d,'Repeticiones',[['1','1'],['2','2'],['4','4'],['8','8']]);
+    const mirrors=addSelect(d,'Combates espejo',[['yes','Incluir'],['no','Omitir']]);
+    const msg=document.createElement('p');
+    msg.textContent='Una pelea a la vez, sin dibujar la arena. Cada pareja intercambia lados.';
+    d.append(msg,button('Simular cruces',()=>{
+        const roster=size.value==='all'?pool:checked.filter(item=>item.input.checked).map(item=>item.id);
+        if (size.value!=='all' && roster.length!==Number(size.value)) {
+            msg.textContent='Selecciona exactamente '+size.value+' luchadores.';
+            return;
+        }
+        d.close();
+        startTournament({kind:'roundRobin',roster,mirrors:mirrors.value==='yes',
+            total:Number(repeat.value),teamSize:1,simulate:true});
+    }),button('Volver',()=>{d.close();openTournamentMenu();}));
+    d.showModal();
+}
+
+export function openTournamentMenu() {
+    if(current)return;
+    const d=makeDialog('Torneos');
+    const kind=addSelect(d,'Formato',[['single','1v1'],['team','Equipos de tres'],['roster','Reparto completo · 1v1']]);
+    const size=addSelect(d,'Participantes',[]);
+    const mode=addSelect(d,'Modo',[['watch','Ver torneo CPU'],['play','Jugar contra CPU'],['simulate','Simular torneos']]);
+    const picks=document.createElement('div');d.append(picks);
+    const total=document.createElement('input');total.type='number';total.min='1';total.step='1';total.value='10';
+    const amount=document.createElement('label');amount.textContent='Cantidad de torneos';amount.append(total);d.append(amount);
+    const msg=document.createElement('p');
+    function update() {
+        const sizes=kind.value==='single'?[32,16,8,4]:kind.value==='team'?[8,4,2]:[poolList().length];
+        const selected=size.value;
+        size.replaceChildren(...sizes.map(n=>new Option(String(n),n)));
+        if(sizes.includes(Number(selected)))size.value=selected;
+        size.disabled=kind.value==='roster';
+        amount.hidden=mode.value!=='simulate';
+        picks.replaceChildren();
+        if(mode.value==='play') for(let i=0;i<(kind.value==='team'?3:1);i++) {
+            const choose=addSelect(picks,'Luchador '+(i+1),poolList().map(id=>[id,id]));
+            choose.selectedIndex=i;
+        }
+        msg.textContent=mode.value==='simulate'?'Combates CPU de hasta 28 s simulados. Puedes detener el lote en cualquier momento.':'';
+    }
+    kind.onchange=mode.onchange=update;
+    d.append(msg,button('Empezar',()=>{
+        const n=mode.value==='simulate'?Number(total.value):1;
+        const playerRoster=mode.value==='play'?[...picks.querySelectorAll('select')].map(s=>s.value):null;
+        if(!Number.isSafeInteger(n)||n<1){msg.textContent='Introduce una cantidad entera de torneos.';return;}
+        if(playerRoster && new Set(playerRoster).size!==playerRoster.length){msg.textContent='Elige tres luchadores distintos.';return;}
+        const options={kind:kind.value,size:Number(size.value),teamSize:kind.value==='team'?3:1,
+            total:n,playerRoster,simulate:mode.value==='simulate'};
+        d.close();
+        startTournament(options);
+    }),button('Todos contra todos',()=>{d.close();openRoundRobinMenu();}),
+    button('Datos de CPU',()=>{d.close();showReport();}),button('Volver',()=>d.close()));
+    update();d.showModal();
+}

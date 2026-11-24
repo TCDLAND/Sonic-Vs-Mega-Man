@@ -10,7 +10,7 @@ import {
 } from './assets.js';
 
 export const SCALE = 3;             // Bass ×3
-export const TREBLE_SCALE = 2;      // Treble ×2 ← CAMBIO
+export const TREBLE_SCALE = 2;      // Reducido un nivel desde x3.
 
 // ========================================
 // ANIMACIONES DE BASS
@@ -110,7 +110,7 @@ export const TREBLE_ANIMATIONS = {
 // HELPERS DE DIBUJO
 // ========================================
 
-export function drawBassFrame(ctx, animKey, frameIndex, pivotX, pivotY, facingLeft) {
+export function drawBassFrame(ctx, animKey, frameIndex, pivotX, pivotY, facingLeft, characterScale = 1) {
     const anim = ANIMATIONS[animKey];
     if (!anim) return;
     if (!anim.img.complete || anim.img.naturalWidth === 0) return;
@@ -121,8 +121,8 @@ export function drawBassFrame(ctx, animKey, frameIndex, pivotX, pivotY, facingLe
     const sy = 0;
     const sw = anim.frameW;
     const sh = anim.frameH;
-    const renderW = anim.frameW * SCALE;
-    const renderH = anim.frameH * SCALE;
+    const renderW = anim.frameW * SCALE * characterScale;
+    const renderH = anim.frameH * SCALE * characterScale;
     const drawX = pivotX - renderW / 2;
     const drawY = pivotY - renderH;
 

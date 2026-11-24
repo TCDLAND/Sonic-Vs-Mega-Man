@@ -2,7 +2,7 @@
 // HELPERS Y UTILIDADES
 // ========================================
 
-import { ctx } from './state.js';
+import { ctx, game } from './state.js';
 
 // Audio Context global (uno solo para todo el juego)
 let audioCtx = null;
@@ -17,7 +17,7 @@ function getAudioCtx() {
 // Reproducir audio con amplificación
 // gainMultiplier por defecto = 5.0 (para audios de SNES)
 export function playSound(audio, gainMultiplier = 5.0) {
-    if (!audio) return;
+    if (!audio || game.quietSimulation) return;
     try {
         const actx = getAudioCtx();
 

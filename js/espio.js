@@ -1,12 +1,21 @@
-import { configureCombatant } from './combat-system.js';
+import { updatedCells, updatedFrame } from './fighter-update-art.js';
+import { drawRobotFrame } from './robot-sprites.js';
+import { combatNow } from './combat-clock.js';
+import { configureCombatant, dealDamage } from './combat-system.js';
 // ========================================
 // CLASE ESPIO
 // ========================================
 
 import { Fighter } from './fighter.js';
 import { ctx, game } from './state.js';
-import { espioSprite, espioSprite2, espioSprite3 } from './assets.js';
+import { espioSprite3 } from './assets.js';
 import { getCellCoords } from './utils.js';
+import { HIGHWAY_WALLS } from './wall-system.js';
+
+const ninjaShots = {
+    kunai: { images:updatedCells('espio-kingnoel','kunaiShot'), width:34, height:44 },
+    shuriken: { images:updatedCells('espio-kingnoel','shurikenShot'), width:58, height:40 }
+};
 
 export class Espio extends Fighter {
     constructor(x, y, controls) {
@@ -15,10 +24,9 @@ export class Espio extends Fighter {
         this.supportsSpin = true;
         this.setSpinProfile('espio');
         this.isSprite = true;
-        this.spriteImg = espioSprite;
-        this.spriteImg2 = espioSprite2;
-        this.setSpinProfile('espio');
     }
+
+    projectileProfile(kind) { return ninjaShots[kind]; }
 
     getTongueCells() {
         if (this.tongueType === "forward") {
@@ -43,207 +51,131 @@ export class Espio extends Fighter {
         }
     }
 
+    getTongueRects() {
+        if (!espioSprite3.naturalWidth) return [];
+        const facingLeft = this.tongueDirection < 0;
+        const width=Math.round(this.width), height=Math.round(this.height);
+        return this.getTongueCells().map(cell => ({
+            ...getCellCoords(cell.frameNum, espioSprite3.naturalWidth, espioSprite3.naturalHeight, 8, 6),
+            x: this.x - game.cameraX + cell.offsetCol * width * (facingLeft ? -1 : 1),
+            y: this.y + cell.offsetRow * height,
+            w: width, h: height, facingLeft, isDamageCell: cell.isDamageCell
+        }));
+    }
+
+    startNinjaTechnique(kind, target) {
+        const now = combatNow();
+        if (!['smoke','drill','tornado'].includes(kind) || !target || !this.isGrounded || this.isBusy() ||
+            this.isHitstunned() || this.isVulnerable || now < (this.ninjaReadyAt ?? 0)) return false;
+        this.ninja = { kind, target, started: now, direction: target.x >= this.x ? 1 : -1 };
+        this.ninjaReadyAt = now + 850;
+        this.vx = 0;
+        return true;
+    }
+
+    isBusy() { return !!this.ninja || super.isBusy(); }
+    isAttacking() { return !!this.ninja || super.isAttacking(); }
+
+    update(opponentX, instance) {
+        const move = this.ninja;
+        if (move && this.isHitstunned()) this.ninja = null;
+        if (this.ninja) this.vx = 0;
+        super.update(opponentX, instance);
+        if (!this.ninja) return;
+        const age = combatNow() - move.started;
+        if (age >= 650) { this.ninja = null; return; }
+        if (move.kind === 'drill' && age >= 145 && age < 480) {
+            this.x = Math.max(HIGHWAY_WALLS[0].x,Math.min(HIGHWAY_WALLS[1].x-this.width,
+                this.x+move.direction*9));
+        }
+        if (move.kind === 'smoke' && !move.crossed && age >= 240) {
+            const target = move.target;
+            const side = this.x < target.x ? 1 : -1;
+            const desired = side > 0 ? target.x + target.width + 24 : target.x - this.width - 24;
+            const left = HIGHWAY_WALLS[0].x, right = HIGHWAY_WALLS[1].x - this.width;
+            const fallback = side > 0 ? target.x - this.width - 24 : target.x + target.width + 24;
+            this.x = Math.max(left, Math.min(right, desired < left || desired > right ? fallback : desired));
+            move.direction = target.x >= this.x ? 1 : -1;
+            if (move.direction === -side) {
+                target.smokeTurnUntil = combatNow() + 130;
+                target.smokeTurnSource = this;
+            }
+            move.crossed = true;
+        }
+    }
+
+    tryHit(target) {
+        const move = this.ninja;
+        if (!move || move.hit || target !== move.target || target.health <= 0 || this.isHitstunned()) return;
+        const age = combatNow() - move.started;
+        const dx = target.x + target.width/2 - this.x - this.width/2;
+        const dy = Math.abs(target.y + target.height - this.y - this.height);
+        const timing = { smoke: [320,460,180,9], drill: [160,485,125,11], tornado: [240,505,175,13] };
+        const [start,end,reach,damage] = timing[move.kind];
+        if (age < start || age > end || Math.abs(dx) > reach || dy > (move.kind==='tornado'?150:75)) return;
+        if (move.kind !== 'tornado' && dx * move.direction < -20) return;
+        move.hit = true;
+        const names = { smoke:'Corte entre humo', drill:'Trompo ninja', tornado:'Tornado ninja' };
+        dealDamage(target,damage,{attacker:this,attackName:names[move.kind],impactX:this.x+this.width/2,
+            damageCategory:move.kind==='tornado'?'técnica':'cuerpo a cuerpo'});
+        if (move.kind === 'tornado' && !target.lastGuardImpact?.front) {
+            target.vy = -10;
+            target.isGrounded = false;
+        }
+    }
+
     draw(opponentX) {
+        const now = combatNow();
+        let direction = opponentX < this.x ? -1 : 1;
+        if (this.isTongueAttacking) {
+            for (const cell of this.getTongueRects()) {
+                ctx.save();
+                ctx.translate(cell.x + (cell.facingLeft ? cell.w : 0), cell.y);
+                if (cell.facingLeft) ctx.scale(-1,1);
+                ctx.drawImage(espioSprite3,cell.sx,cell.sy,cell.sw,cell.sh,0,0,cell.w,cell.h);
+                ctx.restore();
+            }
+            return;
+        }
+        let key = 'idle', index = Math.floor(now/130);
+        if (this.ninja) {
+            const age = now-this.ninja.started;
+            key = this.ninja.kind;
+            if (key==='smoke' && this.ninja.crossed) index = Math.max(0,3-Math.floor((age-240)/90));
+            else if (key==='drill') index=Math.floor(age/54);
+            else index=Math.min(key==='tornado'?5:3,Math.floor(age/95));
+            direction=this.ninja.direction;
+        } else if (this.isThrowingKunai) {
+            key='kunai'; index=Math.min(4,Math.floor(this.kunaiTimer/4));
+        } else if (this.isThrowingShuriken) {
+            key='shuriken'; index=Math.min(5,Math.floor(this.shurikenTimer/4));
+        } else if (this.isSpinDashActive || this.isSpinning) {
+            key='spin'; index=Math.floor(this.spinAnimFrame);
+        } else if (this.isJabActive) {
+            key='jab'; index=Math.min(2,Math.floor(this.jabTimer/3));
+        } else if (this.isHeavyActive) {
+            key='heavy'; index=Math.min(4,Math.max(0,this.heavyFrame-1));
+        } else if (this.isKickLightActive) {
+            key='kick'; index=Math.floor(now/65);
+        } else if (this.isKickHeavyActive) {
+            key='upper'; index=Math.min(3,Math.floor(this.kickHeavyTimer/4));
+        } else if (this.isGuarding) {
+            key='guard'; index=this.lastGuardImpact?.blocked && now-this.lastGuardImpact.at<160 ? 2 : 0;
+        } else if (this.isCrouching) {
+            key='crouch'; index=0;
+        } else if (this.isDashing) {
+            key='dash'; index=Math.floor(now/60);
+        } else if (!this.isGrounded) {
+            key=this.vy<0?'jump':'fall'; index=Math.floor(now/90);
+        } else if (Math.abs(this.vx)>.5) {
+            key='run'; index=Math.floor(now/77);
+        }
+
+        const frame = updatedFrame('espio-kingnoel',key,index,this.x+this.width/2,this.y+this.height,this.height/42,direction);
+        if (!frame) return;
         ctx.save();
-        const cameraX = game.cameraX;
-        const facingLeft = (this.x > opponentX);
-        const drawX = this.x - cameraX;
-
-        if (this.isVulnerable && Math.floor(performance.now() / 100) % 2 === 0) {
-            ctx.globalAlpha = 0.5;
-        }
-
-        if (this.isTongueAttacking && espioSprite3.complete && espioSprite3.naturalWidth !== 0) {
-            const sheetW = espioSprite3.naturalWidth;
-            const sheetH = espioSprite3.naturalHeight;
-            const cols = 8;
-            const rows = 6;
-            const cellW = this.width;
-            const cellH = this.height;
-            const baseX = this.x - cameraX;
-            const baseY = this.feetY - cellH;
-            const cells = this.getTongueCells();
-            this.lastTongueRects = [];
-
-            const tongueFacingLeft = (this.tongueDirection < 0);
-
-            cells.forEach((cell) => {
-                const c = getCellCoords(cell.frameNum, sheetW, sheetH, cols, rows);
-                let dx;
-                if (tongueFacingLeft) {
-                    dx = baseX + (-cell.offsetCol - 1) * cellW;
-                } else {
-                    dx = baseX + cell.offsetCol * cellW;
-                }
-                const dy = baseY + cell.offsetRow * cellH;
-
-                this.lastTongueRects.push({
-                    x: dx, y: dy, w: cellW, h: cellH,
-                    frameNum: cell.frameNum,
-                    isDamageCell: cell.isDamageCell,
-                    sx: c.sx, sy: c.sy, sw: c.sw, sh: c.sh,
-                    facingLeft: tongueFacingLeft
-                });
-
-                if (tongueFacingLeft) {
-                    ctx.save();
-                    ctx.translate(dx + cellW, 0);
-                    ctx.scale(-1, 1);
-                    ctx.drawImage(espioSprite3, c.sx, c.sy, c.sw, c.sh, 0, dy, cellW, cellH);
-                    ctx.restore();
-                } else {
-                    ctx.drawImage(espioSprite3, c.sx, c.sy, c.sw, c.sh, dx, dy, cellW, cellH);
-                }
-            });
-
-            ctx.restore();
-            this.drawHealthBar();
-            return;
-        }
-
-        if (this.isJabActive && espioSprite3.complete) {
-            const frameNum = 19;
-            const c = getCellCoords(frameNum, espioSprite3.naturalWidth, espioSprite3.naturalHeight, 8, 6);
-            this.drawSingleCell(espioSprite3, c, drawX, this.y, facingLeft);
-            ctx.restore();
-            this.drawHealthBar();
-            return;
-        }
-
-        if (this.isKickLightActive && espioSprite3.complete) {
-            const frameNum = 20;
-            const c = getCellCoords(frameNum, espioSprite3.naturalWidth, espioSprite3.naturalHeight, 8, 6);
-            this.drawSingleCell(espioSprite3, c, drawX, this.y, facingLeft);
-            ctx.restore();
-            this.drawHealthBar();
-            return;
-        }
-
-        if (this.isHeavyActive && espioSprite3.complete) {
-            const frameMap = { 1: 12, 2: 13, 3: 14, 4: 15 };
-            const frameNum = frameMap[this.heavyFrame];
-            const c = getCellCoords(frameNum, espioSprite3.naturalWidth, espioSprite3.naturalHeight, 8, 6);
-            this.drawSingleCell(espioSprite3, c, drawX, this.y, facingLeft);
-            ctx.restore();
-            this.drawHealthBar();
-            return;
-        }
-
-        if (this.isKickHeavyActive && espioSprite3.complete) {
-            let frameNum;
-            if (this.kickHeavyPhase === 1) {
-                const idx = Math.min(3, Math.floor(this.kickHeavyTimer / 5));
-                frameNum = 23 + idx;
-            } else if (this.kickHeavyPhase === 2) {
-                const idx = Math.min(3, Math.floor(this.kickHeavyTimer / 5));
-                frameNum = 27 + idx;
-            } else {
-                const idx = Math.min(1, Math.floor(this.kickHeavyTimer / 5));
-                frameNum = 31 + idx;
-            }
-            const c = getCellCoords(frameNum, espioSprite3.naturalWidth, espioSprite3.naturalHeight, 8, 6);
-            this.drawSingleCell(espioSprite3, c, drawX, this.y, facingLeft);
-            ctx.restore();
-            this.drawHealthBar();
-            return;
-        }
-
-        let frameNumber;
-        let sx, sy, sw, sh;
-        let renderWidth = this.width;
-        let renderHeight = this.height;
-        let renderY = this.y;
-        let currentImageToUse = this.spriteImg;
-
-        if (this.isSpinDashActive || this.isSpinning) {
-            if (this.spriteImg2 && this.spriteImg2.complete && this.spriteImg2.naturalWidth !== 0) {
-                currentImageToUse = this.spriteImg2;
-            }
-            const spinFrames = [1, 2, 3];
-            frameNumber = spinFrames[Math.floor(this.spinAnimFrame) % spinFrames.length];
-            const c = getCellCoords(frameNumber - 1, currentImageToUse.naturalWidth, currentImageToUse.naturalHeight, 8, 6);
-            sx = c.sx; sy = c.sy; sw = c.sw; sh = c.sh;
-            renderHeight = 140;
-            renderY = this.getCurrentY();
-        }
-        else {
-            const columns = 8;
-            const rows = 6;
-
-            if (this.isCrouching) {
-                const c = getCellCoords((4 * columns) + 7, currentImageToUse.naturalWidth, currentImageToUse.naturalHeight, columns, rows);
-                sx = c.sx; sy = c.sy; sw = c.sw; sh = c.sh;
-            }
-            else if (this.isThrowingShuriken) {
-                const c = getCellCoords((4 * columns) + 6, currentImageToUse.naturalWidth, currentImageToUse.naturalHeight, columns, rows);
-                sx = c.sx; sy = c.sy; sw = c.sw; sh = c.sh;
-            }
-            else if (this.isThrowingKunai) {
-                const c = getCellCoords(40, currentImageToUse.naturalWidth, currentImageToUse.naturalHeight, columns, rows);
-                sx = c.sx; sy = c.sy; sw = c.sw; sh = c.sh;
-            }
-            else {
-                if (this.isDashing) {
-                    frameNumber = this.dashFrames[this.dashFrame];
-                } else if (!this.isGrounded) {
-                    frameNumber = (this.vy < 0) ? this.jumpUpFrame : this.jumpDownFrame;
-                } else if (this.isGuarding && this.keys[this.controls.crouch]) {
-                    frameNumber = this.guardFrames[Math.floor(this.animFrame) % this.guardFrames.length];
-                } else if (this.isMovingAway(opponentX)) {
-                    frameNumber = this.guardFrames[Math.floor(this.animFrame) % this.guardFrames.length];
-                } else if (this.vx !== 0) {
-                    if (this.walkReverse) {
-                        const total = this.walkFrames.length;
-                        const idx = total - 1 - (Math.floor(this.animFrame) % total);
-                        frameNumber = this.walkFrames[idx];
-                    } else {
-                        frameNumber = this.walkFrames[Math.floor(this.animFrame) % this.walkFrames.length];
-                    }
-                } else {
-                    frameNumber = this.idleFrames[Math.floor(this.animFrame) % this.idleFrames.length];
-                }
-                const c = getCellCoords(frameNumber - 1, currentImageToUse.naturalWidth, currentImageToUse.naturalHeight, columns, rows);
-                sx = c.sx; sy = c.sy; sw = c.sw; sh = c.sh;
-            }
-        }
-
-        if (facingLeft && !this.isSpinDashActive) {
-            ctx.save();
-            ctx.translate(drawX + renderWidth, 0);
-            ctx.scale(-1, 1);
-            ctx.drawImage(currentImageToUse, sx, sy, sw, sh, 0, renderY, renderWidth, renderHeight);
-            ctx.restore();
-        } else if (this.isSpinDashActive && this.spinDirection < 0) {
-            ctx.save();
-            ctx.translate(drawX + renderWidth, 0);
-            ctx.scale(-1, 1);
-            ctx.drawImage(currentImageToUse, sx, sy, sw, sh, 0, renderY, renderWidth, renderHeight);
-            ctx.restore();
-        } else {
-            ctx.drawImage(currentImageToUse, sx, sy, sw, sh, drawX, renderY, renderWidth, renderHeight);
-        }
-
+        if (this.isVulnerable && Math.floor(now/100)%2===0) ctx.globalAlpha=.55;
+        drawRobotFrame(ctx,frame,game.cameraX);
         ctx.restore();
-        this.drawHealthBar();
-    }
-
-    drawSingleCell(img, c, drawX, renderY, facingLeft) {
-        if (facingLeft) {
-            ctx.save();
-            ctx.translate(drawX + this.width, 0);
-            ctx.scale(-1, 1);
-            ctx.drawImage(img, c.sx, c.sy, c.sw, c.sh, 0, renderY, this.width, this.height);
-            ctx.restore();
-        } else {
-            ctx.drawImage(img, c.sx, c.sy, c.sw, c.sh, drawX, renderY, this.width, this.height);
-        }
-    }
-
-    drawHealthBar() {
-        const cameraX = game.cameraX;
-        ctx.fillStyle = 'red';
-        ctx.fillRect(this.x - cameraX, this.y - 20, this.width, 10);
-        ctx.fillStyle = 'lime';
-        ctx.fillRect(this.x - cameraX, this.y - 20, this.width * (this.health / this.maxHealth), 10);
     }
 }

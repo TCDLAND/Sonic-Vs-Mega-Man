@@ -1,4 +1,8 @@
-import { configureCombatant } from './combat-system.js';
+import { combatNow } from './combat-clock.js';
+import { captureTournamentTool } from './tournament-damage.js';
+import { robotFrame, drawRobotFrame, bassSpriteScale, BASS_IDLE_FRAME_MS } from './robot-sprites.js';
+import { BASS_MOVES, beginRobotMove, updateRobotMove, hitRobotMove } from './robot-combat.js';
+import { configureCombatant, dealDamage } from './combat-system.js';
 // ========================================
 // CLASE BASS + TREBLE
 // ========================================
@@ -11,12 +15,10 @@ import {
     busterAudio, sonicJumpAudio,
     dashBassAudio, busterBassAudio, bassBrincoIdaAudio, bassPisoAudio
 } from './assets.js';
-import {
-    ANIMATIONS, TREBLE_ANIMATIONS, SCALE, TREBLE_SCALE,
-    drawBassFrame, drawTrebleAnimFrame, getAnimationFrame
-} from './animations.js';
+import { TREBLE_SCALE, drawTrebleAnimFrame } from './animations.js';
 import { BassBullet } from './bullet.js';
 import { worldWidth } from './config.js';
+import { HIGHWAY_WALLS } from './wall-system.js';
 import { opaqueInRect } from './pixel-collision.js';
 
 // ========================================
@@ -34,6 +36,7 @@ export const TREBLE_BULLET_IMPACT_B = { cells: [
 
 const TREBLE_TARGET_HEIGHT = 210;
 const TREBLE_TARGET_WIDTH = 280;
+const TREBLE_BULLET_SCALE = 2; // El aumento de Treble no agranda también sus disparos.
 
 export function drawTrebleFrame(frameData, anchorX, anchorY, facingLeft) {
     const img = bassSprite3;
@@ -79,8 +82,9 @@ export class Treble {
 
         this.x = ownerX;
         this.feetY = ownerY;
-        this.width = 100;
-        this.height = 50;
+        // Hurtbox del cuerpo a escala del idle dibujado; x sigue siendo pivote central.
+        this.width = 97 * TREBLE_SCALE;
+        this.height = 48 * TREBLE_SCALE;
 
         this.isActive = true;
         this.state = "intro";
@@ -384,8 +388,8 @@ export class Treble {
         // toma la MISMA altura visual que Treble: 96 px. Así deja de verse
         // gigantesca y nace literalmente superpuesta sobre la parte frontal
         // de Treble, sin alterar la altura de ninguno de los dos.
-        const trebleRenderW = 97 * TREBLE_SCALE;
-        const trebleRenderH = 48 * TREBLE_SCALE;
+        const trebleRenderW = 97 * TREBLE_BULLET_SCALE;
+        const trebleRenderH = 48 * TREBLE_BULLET_SCALE;
         const bulletH = trebleRenderH;
         const bulletW = bulletH * (37.5 / 50);
         const frontCenterX = this.x + dir * (trebleRenderW * 0.25);
@@ -395,6 +399,7 @@ export class Treble {
         game.trebleBullets.push({
             x: spawnX,
             y: spawnY,
+            owner: this.owner,
             vx: dir * (charged ? 12 : 16),
             vy: charged ? -8 : -4,
             gravity: charged ? 0.4 : 0.2,
@@ -413,11 +418,11 @@ export class Treble {
     }
 
     getCurrentY() {
-        return this.feetY - this.height;
+        return this.getPixelBodyFrame()?.dy ?? this.y;
     }
 
     getCurrentHeight() {
-        return this.height;
+        return this.getPixelBodyFrame()?.dh ?? this.height;
     }
 
     draw() {
@@ -489,8 +494,8 @@ export class Bass extends Fighter {
         configureCombatant(this, 'bass', 'BASS');
 
         this.feetY = y;
-        this.width = 126;
-        this.height = 153;
+        this.width = 126 * this.characterScale;
+        this.height = 153 * this.characterScale;
         this.y = this.feetY - this.height;
 
         this.state = "intro";
@@ -510,10 +515,11 @@ export class Bass extends Fighter {
 
         this.shootType = null;
         this.shootBurst = 0;
-        this.shootBurstCount = 12;
+        this.shootBurstCount = 8;
+        this.burstReadyAt = 0;
         this.shootBulletFired = false;
 
-        this.lastDirectionPress = { left: 0, right: 0 };
+        this.lastDirectionPress = { left: -Infinity, right: -Infinity };
         this.doubleTapDelay = 300;
 
         this.activeTreble = null;
@@ -522,32 +528,25 @@ export class Bass extends Fighter {
 
     setState(newState) {
         if (this.state === newState) return;
-
-        const oldHeight = this.height;
+        if (this.state === 'shoot') this.burstReadyAt = combatNow() + 520;
         this.state = newState;
         this.stateTimer = 0;
         this.animElapsed = 0;
         this.shootBulletFired = false;
-
-        if (newState === "jump") {
-            this.height = 180;
-        } else {
-            this.height = 153;
-        }
-
-        if (oldHeight !== this.height) {
-            this.y = this.y + oldHeight - this.height;
-        }
+        // La silueta del frame alfa define el contacto; el cuerpo no crece al saltar.
     }
 
+    checkDoubleTap(direction) { this.tryDash(direction); }
+
     tryDash(direction) {
-        const now = performance.now();
+        if (this.isBusy()) return;
+        const now = combatNow();
 
         // Bass NO puede convertir una pulsación aérea en dash terrestre.
         // Antes el doble tap seguía activo durante el salto y setState("dash")
         // aplicaba dashSpeed en el aire, haciendo que recorriera media pantalla.
-        if (!this.isGrounded || this.state === "jump") {
-            this.lastDirectionPress[direction] = 0;
+        if (!this.isGrounded || this.isHitstunned() || !['idle', 'walk'].includes(this.state)) {
+            this.lastDirectionPress[direction] = -Infinity;
             return;
         }
 
@@ -562,16 +561,15 @@ export class Bass extends Fighter {
     }
 
     tryShoot(verticalDir, horizontalDir) {
+        const now = combatNow();
+        if (now < this.burstReadyAt || this.robotMove || this.jetUntil > now || this.barrierUntil > now ||
+            this.isHitstunned() || this.wasInAirFromKnockback) return false;
         const onGround = (this.state === "idle" || this.state === "walk") && this.isGrounded;
         const inJumpEarly = this.state === "jump" && this.stateTimer < 300;
 
-        if (!onGround && !inJumpEarly) return;
+        if (!onGround && !inJumpEarly) return false;
 
-        if (this.state === "jump") {
-            this.vy = 0;
-            this.y = this.feetY - this.height;
-            this.isGrounded = true;
-        }
+        // Los tiros aéreos conservan su altura y la gravedad.
 
         let type = 'shootHor';
         if (verticalDir === 'up' && horizontalDir === 'neutral') {
@@ -585,9 +583,11 @@ export class Bass extends Fighter {
         this.shootBulletFired = false;
         this.vx = 0;
         this.setState("shoot");
+        return true;
     }
 
     update(opponentX, selfInstance) {
+        this.previousBodyX = this.x;
         const dt = 16.67;
         this.stateTimer += dt;
         this.animElapsed += dt;
@@ -618,10 +618,41 @@ export class Bass extends Fighter {
             return;
         }
 
+        const opponentOnRight = opponentX > this.x;
+        const backKey = opponentOnRight ? this.controls.left : this.controls.right;
+        const hitstunned = this.isHitstunned();
+        if (this.barrierUntil > combatNow()) { this.vx = 0; return; }
+        if (this.jetUntil > combatNow()) {
+            if (combatNow() - this.jetAt < 66) { this.vx = 0; return; }
+            this.vx = this.jetDirection * 15;
+            this.vy = this.jetAngle;
+            this.x = Math.max(HIGHWAY_WALLS[0].x, Math.min(HIGHWAY_WALLS[1].x - this.width, this.x + this.vx));
+            this.y = Math.max(35, this.y + this.vy);
+            return;
+        }
+        if (this.jetUntil) {
+            this.jetUntil = 0;
+            this.vx *= .35;
+            this.vy = Math.max(this.vy, -2);
+        }
+        if (!this.isGrounded && !this.robotMove && this.state === 'idle') this.setState('jump');
+        const canGuard = !this.robotMove && !hitstunned && (this.state === 'idle' || this.state === 'walk') && this.isGrounded && !this.isVulnerable && combatNow() >= (this.guardBrokenUntil || 0);
+        this.isGuarding = canGuard && Boolean(this.keys[backKey]);
+        this.guardType = this.isGuarding ? (this.keys[this.controls.crouch] ? 'low' : 'high') : null;
+
+
         // IDLE
-        if (this.state === "idle") {
-            const leftPressed = this.keys[this.controls.left];
-            const rightPressed = this.keys[this.controls.right];
+        if (this.wasInAirFromKnockback) {
+            this.setState("jump");
+            this.vy += this.gravity;
+        } else if (this.robotMove) {
+            updateRobotMove(this);
+            if (!this.isGrounded) this.vy += this.gravity;
+        } else if (hitstunned && (this.state === "shoot" || this.state === "dash")) {
+            this.setState("idle");
+        } else if (this.state === "idle") {
+            const leftPressed = !hitstunned && this.keys[this.controls.left];
+            const rightPressed = !hitstunned && this.keys[this.controls.right];
 
             if (leftPressed || rightPressed) {
                 const moveDir = leftPressed ? -1 : 1;
@@ -629,10 +660,13 @@ export class Bass extends Fighter {
                 this.vx = moveDir * this.speed;
                 this.setState("walk");
             } else {
-                this.vx = 0;
+                if (hitstunned) {
+                    this.vx *= 0.84;
+                    if (Math.abs(this.vx) < 0.2) this.vx = 0;
+                } else this.vx = 0;
             }
 
-            if (this.keys[this.controls.jump] && this.isGrounded && !this.keys['KeyJ']) {
+            if (!hitstunned && !this.isGuarding && this.keys[this.controls.jump] && this.isGrounded && !this.keys[this.controls.attack]) {
                 this.vy = this.jumpForce;
                 this.jumpPhase = 'up';
                 this.setState("jump");
@@ -642,12 +676,17 @@ export class Bass extends Fighter {
         }
         // WALK
         else if (this.state === "walk") {
-            const leftPressed = this.keys[this.controls.left];
-            const rightPressed = this.keys[this.controls.right];
+            const leftPressed = !hitstunned && this.keys[this.controls.left];
+            const rightPressed = !hitstunned && this.keys[this.controls.right];
 
             if (!leftPressed && !rightPressed) {
-                this.setState("idle");
-                this.vx = 0;
+                if (hitstunned) {
+                    this.vx *= 0.84;
+                    if (Math.abs(this.vx) < 0.2) this.vx = 0;
+                } else {
+                    this.setState(this.isGrounded ? "idle" : "jump");
+                    this.vx = 0;
+                }
             } else {
                 const moveDir = leftPressed ? -1 : 1;
                 this.vx = moveDir * this.speed;
@@ -666,7 +705,7 @@ export class Bass extends Fighter {
                 }
             }
 
-            if (this.keys[this.controls.jump] && this.isGrounded && !this.keys['KeyJ']) {
+            if (!hitstunned && !this.isGuarding && this.keys[this.controls.jump] && this.isGrounded && !this.keys[this.controls.attack]) {
                 this.vy = this.jumpForce;
                 this.jumpPhase = 'up';
                 this.setState("jump");
@@ -681,7 +720,7 @@ export class Bass extends Fighter {
             // Soltar ambas direcciones conserva la inercia horizontal con la que saltó.
             const leftPressed = this.keys[this.controls.left];
             const rightPressed = this.keys[this.controls.right];
-            if (leftPressed !== rightPressed) {
+            if (!hitstunned && leftPressed !== rightPressed) {
                 this.vx = (leftPressed ? -1 : 1) * this.speed;
             }
 
@@ -695,6 +734,7 @@ export class Bass extends Fighter {
             }
         }
         else if (this.state === "shoot") {
+            if (!this.isGrounded) this.vy += this.gravity;
             this.vx = 0;
             const frameDuration = 100 / 3;
             const currentFrame = Math.floor(this.stateTimer / frameDuration);
@@ -708,7 +748,7 @@ export class Bass extends Fighter {
             if (this.stateTimer >= 100) {
                 this.shootBurst++;
                 if (this.shootBurst >= this.shootBurstCount) {
-                    this.setState("idle");
+                    this.setState(this.isGrounded ? "idle" : "jump");
                     this.vx = 0;
                 } else {
                     this.stateTimer = 0;
@@ -719,14 +759,6 @@ export class Bass extends Fighter {
         }
         else if (this.state === "hurt") { this.vx = 0; }
         else if (this.state === "hurtHard") { this.vx = 0; }
-
-        // Knockback aéreo: Bass usa un update propio y antes solo aplicaba
-        // gravedad durante el estado "jump". Si un golpe lo lanzaba mientras
-        // estaba en idle/walk/hurt, conservaba un vy negativo para siempre y
-        // salía volando del mapa. Aplicamos gravedad también al knockback.
-        if (this.wasInAirFromKnockback && !this.isGrounded && this.state !== "jump") {
-            this.vy += this.gravity;
-        }
 
         this.x += this.vx;
         this.y += this.vy;
@@ -753,8 +785,8 @@ export class Bass extends Fighter {
             if (this.knockbackAirTimer > 30) this.vx *= 0.94;
         }
 
-        if (this.x < 0) this.x = 0;
-        if (this.x + this.width > worldWidth) this.x = worldWidth - this.width;
+        const [leftWall, rightWall] = HIGHWAY_WALLS;
+        this.x = Math.max(leftWall.x, Math.min(rightWall.x - this.width, this.x));
 
         if (this.activeTreble && !this.activeTreble.isActive) {
             this.activeTreble = null;
@@ -764,8 +796,8 @@ export class Bass extends Fighter {
 
     fireBullet(selfInstance) {
         const direction = this.facingLeft ? -1 : 1;
-        const spawnX = this.x + (direction > 0 ? 40 : -40);
-        const spawnY = this.y + 30;
+        const spawnX = this.x + this.width / 2 + direction * this.width * .38;
+        const spawnY = this.y + this.height * (this.shootType==='shootHor'?.44:.37);
 
         let vx = direction * 18;
         let vy = 0;
@@ -773,100 +805,137 @@ export class Bass extends Fighter {
         if (this.shootType === "shootArriba") { vx = 0; vy = -18; }
         else if (this.shootType === "shootDiaArriba") { vx = direction * 14; vy = -14; }
 
-        game.bassBullets.push(new BassBullet(spawnX, spawnY, vx, vy, direction, selfInstance, this.shootType));
+        const bullet = new BassBullet(spawnX, spawnY, vx, vy, direction, selfInstance, this.shootType);
+        bullet.x -= bullet.width / 2;
+        bullet.y -= bullet.height / 2;
+        game.bassBullets.push(bullet);
+        captureTournamentTool(selfInstance,'Bass Buster');
     }
 
-    getPixelBodyFrame(opponentX) {
-        let animKey="idle", frameIndex=0;
-        if (this.state === "intro") { animKey="intro"; frameIndex=getAnimationFrame("intro",this.stateTimer); }
-        else if (this.state === "idle") {
-            if (this.health <= this.maxHealth*0.30) { animKey="hurt"; frameIndex=getAnimationFrame("hurt",this.stateTimer); }
-            else { animKey="idle"; frameIndex=getAnimationFrame("idle",this.stateTimer); }
+    getPixelBodyFrame() {
+        const now = combatNow();
+        let key = 'bassIdle', elapsed = now, ms = BASS_IDLE_FRAME_MS, loop = true;
+        if (this.jetUntil > now) {
+            key = 'bassJet'; ms = 66;
+            const jetAge = now - this.jetAt;
+            elapsed = jetAge < 132 ? jetAge : 132 + (jetAge - 132) % 264;
+            loop = false;
+        } else if (this.barrierUntil > now) {
+            key = 'bassBarrier'; ms = 105;
+        } else if (this.guardImpactUntil > now) {
+            key = 'bassGuardImpact'; elapsed = this.guardImpactFrame * 100; ms = 100; loop = false;
+        } else if (this.robotMove) {
+            ({ key, ms } = this.robotMove.spec);
+            elapsed = now - this.robotMove.started;
+            loop = false;
         }
-        else if (this.state === "walk") { animKey="walk"; frameIndex=this.walkFrame; }
-        else if (this.state === "jump") { animKey="jump"; frameIndex=getAnimationFrame("jump",this.stateTimer,this.jumpPhase); }
-        else if (this.state === "dash") { animKey="dash"; frameIndex=getAnimationFrame("dash",this.stateTimer); }
-        else if (this.state === "shoot") { animKey=this.shootType||"shootHor"; frameIndex=Math.min(2,Math.floor(this.stateTimer/(100/3))); }
-        else if (this.state === "hurt") { animKey="hurt"; frameIndex=getAnimationFrame("hurt",this.stateTimer); }
-        else if (this.state === "hurtHard") { animKey="hurtHard"; frameIndex=getAnimationFrame("hurtHard",this.stateTimer); }
-        const anim=ANIMATIONS[animKey];
-        if(!anim?.img?.complete || !anim.img.naturalWidth) return null;
-        const realFrame=anim.sequence[frameIndex % anim.sequence.length];
-        const dw=anim.frameW*SCALE, dh=anim.frameH*SCALE;
-        const pivotX=this.x+this.width/2, pivotY=this.y+this.height;
-        return {img:anim.img,sx:realFrame*anim.frameW,sy:0,sw:anim.frameW,sh:anim.frameH,
-                dx:pivotX-dw/2,dy:pivotY-dh,dw,dh,flipX:this.facingLeft, key:animKey,frame:frameIndex};
-    }
-
-    pixelBodyIntersectsRect(rect, opponentX) {
-        return opaqueInRect(this.getPixelBodyFrame(opponentX), rect, 2);
-    }
-
-    draw(opponentX) {
-        const pivotX = this.x + this.width / 2 - game.cameraX;
-        const pivotY = this.y + this.height;
-
-        let alpha = 1;
-        if (this.isVulnerable && Math.floor(performance.now() / 100) % 2 === 0) alpha = 0.5;
-
-        ctx.save();
-        ctx.globalAlpha = alpha;
-
-        let animKey = "idle";
-        let frameIndex = 0;
-
-        if (this.state === "intro") {
-            animKey = "intro";
-            frameIndex = getAnimationFrame("intro", this.stateTimer);
+        else if (this.state === 'intro') { key = this.stateTimer < 1890 ? 'bassIntro' : 'bassIdle'; elapsed = this.stateTimer; ms = 90; loop = false; }
+        else if (this.wasInAirFromKnockback || now < this.robotHurtUntil) {
+            key = this.wasInAirFromKnockback && Math.abs(this.vx) >= 9 ? 'bassHardHurt' : 'bassHurt';
+            elapsed = Math.max(0, now - (this.robotHurtUntil - 210));
+            ms = 65; loop = false;
         }
-        else if (this.state === "idle") {
-            // Idle lastimado: igual que Sonic, aparece al 30% de vida o menos.
-            // BassHurt.png contiene los 4 frames del idle herido.
-            if (this.health <= this.maxHealth * 0.30) {
-                animKey = "hurt";
-                frameIndex = getAnimationFrame("hurt", this.stateTimer);
+        else if (this.state === 'shoot') {
+            key = this.shootType === 'shootHor' ? (this.isGrounded ? 'bassShot' : 'bassAirShot') : 'bassUpShot';
+            ms = 100 / 3; loop = false;
+            const firstTwo = this.stateTimer < ms ? 0 : 1;
+            if (key === 'bassUpShot') {
+                elapsed = (firstTwo + (this.isGrounded ? 0 : 2) + .5) * ms;
+            } else if (key === 'bassShot') {
+                const finishing = this.shootBurst === this.shootBurstCount - 1 && this.shootBulletFired;
+                elapsed = (finishing ? 2.5 : firstTwo + .5) * ms;
             } else {
-                animKey = "idle";
-                frameIndex = getAnimationFrame("idle", this.stateTimer);
+                elapsed = this.stateTimer;
             }
+        } else if (this.state === 'dash') {
+            key = 'bassDash'; ms = 100; loop = false;
+            const pose = [90, 160, 330, 425].filter(end => this.stateTimer >= end).length;
+            elapsed = pose * ms;
         }
-        else if (this.state === "walk") {
-            animKey = "walk";
-            frameIndex = this.walkFrame;
+        else if (this.state === 'jump') {
+            key = 'bassJump'; ms = 53; loop = false;
+            elapsed = this.stateTimer;
         }
-        else if (this.state === "jump") {
-            animKey = "jump";
-            frameIndex = getAnimationFrame("jump", this.stateTimer, this.jumpPhase);
+        else if (this.isGuarding && !this.keys[this.controls.crouch]) {
+            key = Math.abs(this.x - (this.previousBodyX ?? this.x)) > .1 ? 'bassRetreat' : 'bassGuard';
+            elapsed = this.stateTimer; ms = 72;
         }
-        else if (this.state === "dash") {
-            animKey = "dash";
-            frameIndex = getAnimationFrame("dash", this.stateTimer);
-        }
-        else if (this.state === "shoot") {
-            animKey = this.shootType || "shootHor";
-            frameIndex = Math.min(2, Math.floor(this.stateTimer / (100/3)));
-        }
-        else if (this.state === "hurt") {
-            animKey = "hurt";
-            frameIndex = getAnimationFrame("hurt", this.stateTimer);
-        }
-        else if (this.state === "hurtHard") {
-            animKey = "hurtHard";
-            frameIndex = getAnimationFrame("hurtHard", this.stateTimer);
-        }
-
-        drawBassFrame(ctx, animKey, frameIndex, pivotX, pivotY, this.facingLeft);
-
-        ctx.restore();
-        this.drawHealthBar();
+        else if (this.keys[this.controls.crouch]) { key = 'bassCrouch'; }
+        else if (this.state === 'walk') { key = 'bassRun'; elapsed = this.stateTimer; ms = 58; }
+        const feet = this.y + this.height;
+        return robotFrame(key, elapsed, ms, this.x + this.width / 2, feet,
+            bassSpriteScale(this.height), (key === 'bassJet' ? this.jetDirection : key === 'bassDash' ? this.dashDirection : this.robotMove?.direction) || (this.facingLeft ? -1 : 1), loop);
     }
 
-    drawHealthBar() {
-        const cameraX = game.cameraX;
-        ctx.fillStyle = 'red';
-        ctx.fillRect(this.x - cameraX, this.y - 20, this.width, 10);
-        ctx.fillStyle = 'lime';
-        ctx.fillRect(this.x - cameraX, this.y - 20, this.width * (this.health / this.maxHealth), 10);
+    pixelBodyIntersectsRect(rect) {
+        return opaqueInRect(this.getPixelBodyFrame(), rect, 2);
+    }
+
+    draw() {
+        drawRobotFrame(ctx, this.getPixelBodyFrame(), game.cameraX);
+    }
+
+    startRobotAction(kind) {
+        if (this.isBusy() || this.state === 'intro' || this.wasInAirFromKnockback || (!this.isGrounded && kind !== 'punch')) return false;
+        if (!this.isGrounded) kind = 'airPunch';
+        this.setState(this.isGrounded ? 'idle' : 'jump');
+        return beginRobotMove(this, BASS_MOVES[kind], this.facingLeft ? -1 : 1);
+    }
+
+    startJet(direction, horizontal) {
+        const now = combatNow();
+        if (this.isBusy() || this.state === 'intro' || this.wasInAirFromKnockback || now < (this.jetCooldownUntil ?? 0)) return false;
+        this.jetAt = now;
+        this.jetUntil = now + 520;
+        this.jetCooldownUntil = now + 1300;
+        this.jetDirection = direction;
+        this.jetHasHit = false;
+        this.jetAngle = horizontal ? 0 : -7;
+        this.y = Math.min(this.y, this.feetY - this.height - 24);
+        this.isGrounded = false;
+        this.setState('jump');
+        return true;
+    }
+
+    startBarrier() {
+        const now = combatNow();
+        if (this.isBusy() || this.state === 'intro' || !this.isGrounded || now < (this.barrierCooldownUntil ?? 0)) return false;
+        this.barrierUntil = now + 540;
+        this.isGuarding = false;
+        this.guardType = null;
+        this.barrierCooldownUntil = now + 2100;
+        this.setState('idle');
+        return true;
+    }
+
+    blocksProjectile() { return combatNow() < (this.barrierUntil ?? 0); }
+
+    onBlockedHit() {
+        this.guardImpactFrame = ((this.guardImpactFrame ?? -1) + 1) % 2;
+        this.guardImpactUntil = combatNow() + 125;
+    }
+
+    tryHit(receiver) {
+        hitRobotMove(this, receiver);
+        const now = combatNow();
+        if (this.jetHasHit || !(now >= this.jetAt + 66 && now < this.jetUntil)) return;
+        const x = this.x + this.width / 2 + this.jetDirection * 22;
+        const hitRect = { x: x - 28, y: this.y + this.height * .34, w: 56, h: this.height * .48 };
+        const bounds = receiver.getCurrentBounds(this.x);
+        const overlap = hitRect.x < bounds.x + bounds.w && hitRect.x + hitRect.w > bounds.x &&
+            hitRect.y < bounds.y + bounds.h && hitRect.y + hitRect.h > bounds.y;
+        if (!overlap || receiver.pixelBodyIntersectsRect && !receiver.pixelBodyIntersectsRect(hitRect, this.x)) return;
+        this.jetHasHit = true;
+        dealDamage(receiver, 6, { attacker: this, attackName: 'Bass Jet', impactX: x, hitRect });
+    }
+
+    onDamageTaken({stagger=true}={}) { if(!stagger)return;
+        if (this.lastGuardImpact?.blocked) return;
+        this.jetUntil = 0;
+        this.barrierUntil = 0;
+        this.guardImpactUntil = 0;
+        this.robotHurtUntil = combatNow() + 210;
+        this.robotMove = null;
     }
 
     summonTreble(opponentX) {
@@ -881,5 +950,5 @@ export class Bass extends Fighter {
     }
 
     isAttacking() { return this.state === "shoot"; }
-    isBusy() { return this.state === "shoot" || this.state === "hurt" || this.state === "hurtHard"; }
+    isBusy() { return Boolean(this.robotMove) || this.jetUntil > combatNow() || this.barrierUntil > combatNow() || super.isBusy() || this.state === "shoot" || this.state === "hurt" || this.state === "hurtHard"; }
 }

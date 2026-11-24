@@ -1,3 +1,4 @@
+import { combatNow } from './combat-clock.js';
 // ========================================
 // TODAS LAS COLISIONES
 // ========================================
@@ -14,8 +15,12 @@ function receiverPixelsTouchRect(receiver, rect, attacker) {
     return receiver.pixelBodyIntersectsRect(rect, attacker.x + attacker.width / 2);
 }
 
+function fighterBounds(fighter, opponentX = fighter?.x) {
+    return fighter?.getCurrentBounds?.(opponentX) || { x:fighter.x, y:fighter.getCurrentY(), w:fighter.width, h:fighter.getCurrentHeight() };
+}
+
 function sonicPixelAttackTouch(attacker, receiver, kind) {
-    if (attacker?.characterId !== 'sonic' || typeof attacker.pixelAttackHits !== 'function') return true;
+    if (typeof attacker?.pixelAttackHits !== 'function') return true;
     const result = attacker.pixelAttackHits(receiver, kind);
     return result === null ? true : result;
 }
@@ -31,18 +36,18 @@ export function checkJabCollision(attacker, receiver) {
 
     const facingRight = attacker.x < receiver.x;
     const hitX = facingRight ? attacker.x + attacker.width - 30 : attacker.x - 70;
-    const hitY = attacker.feetY - 110;
+    const hitY = attacker.y + attacker.height - 110;
     const hitW = 100;
     const hitH = 110;
 
-    const ry = receiver.getCurrentY();
-    const rh = receiver.getCurrentHeight();
+    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.jabHitDone=true; return; }
+    const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
-    if (hitX < receiver.x + receiver.width && hitX + hitW > receiver.x &&
+    if (hitX < rx + rw && hitX + hitW > rx &&
         hitY < ry + rh && hitY + hitH > ry &&
         receiverPixelsTouchRect(receiver, {x:hitX,y:hitY,w:hitW,h:hitH}, attacker) &&
         sonicPixelAttackTouch(attacker, receiver, 'punch')) {
-        attacker.applyDamage(receiver, attacker.jabDamage, ["low"]);
+        attacker.applyDamage(receiver, attacker.jabDamage, ["low"],null,attacker.characterId==='espio'?'Puño de Espio':undefined);
         attacker.jabHitDone = true;
     }
 }
@@ -62,16 +67,16 @@ export function checkHeavyCollision(attacker, receiver) {
     const hitW = 100;
     const hitH = 100;
 
-    const ry = receiver.getCurrentY();
-    const rh = receiver.getCurrentHeight();
+    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.heavyHitDone=true; return; }
+    const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
-    if (hitX < receiver.x + receiver.width && hitX + hitW > receiver.x &&
+    if (hitX < rx + rw && hitX + hitW > rx &&
         hitY < ry + rh && hitY + hitH > ry &&
         receiverPixelsTouchRect(receiver, {x:hitX,y:hitY,w:hitW,h:hitH}, attacker) &&
         sonicPixelAttackTouch(attacker, receiver, 'heavy')) {
         const dmg = attacker.heavyDamage[attacker.heavyFrame];
         const knockback = attacker.heavyFrame === 4 ? { vx: (facingRight ? 1 : -1) * 10, vy: -10 } : null;
-        attacker.applyDamage(receiver, dmg, ["high"], knockback);
+        attacker.applyDamage(receiver, dmg, ["high"], knockback,attacker.characterId==='espio'?'Golpe fuerte de Espio':undefined);
         attacker.heavyHitDone = true;
 
         if (attacker.heavyFrame === 2) attacker.heavyCanExtend = true;
@@ -95,18 +100,19 @@ export function checkKickLightCollision(attacker, receiver) {
 
     const facingRight = attacker.x < receiver.x;
     const hitX = facingRight ? attacker.x + attacker.width - 30 : attacker.x - 70;
-    const hitY = attacker.feetY - 100;
+    const hitY = attacker.y + attacker.height - 100;
     const hitW = 100;
     const hitH = 100;
 
-    const ry = receiver.getCurrentY();
-    const rh = receiver.getCurrentHeight();
+    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.kickLightHitDone=true; return; }
+    const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
-    if (hitX < receiver.x + receiver.width && hitX + hitW > receiver.x &&
+    if (hitX < rx + rw && hitX + hitW > rx &&
         hitY < ry + rh && hitY + hitH > ry &&
         receiverPixelsTouchRect(receiver, {x:hitX,y:hitY,w:hitW,h:hitH}, attacker) &&
         sonicPixelAttackTouch(attacker, receiver, 'topKick')) {
-        attacker.applyDamage(receiver, attacker.kickLightDamage, ["low"], { vx: (facingRight ? 1 : -1) * 2, vy: -14 });
+        attacker.applyDamage(receiver, attacker.kickLightDamage, ["low"], { vx: (facingRight ? 1 : -1) * 2, vy: -14 },
+            attacker.characterId==='espio'?'Patada ligera de Espio':undefined);
         attacker.kickLightHitDone = true;
     }
 }
@@ -141,15 +147,15 @@ export function checkKickHeavyCollision(attacker, receiver) {
         return;
     }
 
-    const ry = receiver.getCurrentY();
-    const rh = receiver.getCurrentHeight();
+    if (receiver.handleMeleeVsEddie?.({x:hitX,y:hitY,w:hitW,h:hitH},attacker)) { attacker.kickHeavyHitDone=true; return; }
+    const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,attacker.x+attacker.width/2);
 
-    if (hitX < receiver.x + receiver.width && hitX + hitW > receiver.x &&
+    if (hitX < rx + rw && hitX + hitW > rx &&
         hitY < ry + rh && hitY + hitH > ry &&
         receiverPixelsTouchRect(receiver, {x:hitX,y:hitY,w:hitW,h:hitH}, attacker) &&
         sonicPixelAttackTouch(attacker, receiver, 'sideKick')) {
         if (attacker.kickHeavyPhase === 2 && receiver.isGuarding && receiver.guardType === "low") return;
-        attacker.applyDamage(receiver, dmg, guardBreaks, knockback);
+        attacker.applyDamage(receiver, dmg, guardBreaks, knockback,attacker.characterId==='espio'?'Patada fuerte de Espio':undefined);
         attacker.kickHeavyHitDone = true;
         if (attacker.kickHeavyPhase === 1) attacker.kickHeavyCanExtend = true;
     }
@@ -159,13 +165,10 @@ export function checkKickHeavyCollision(attacker, receiver) {
 // SPIN DASH
 // ============================
 function spinRectsOverlap(a, b) {
-    const ay = a.getCurrentY();
-    const ah = a.getCurrentHeight();
-    const by = b.getCurrentY();
-    const bh = b.getCurrentHeight();
-    const geo = a.x < b.x + b.width && a.x + a.width > b.x && ay < by + bh && ay + ah > by;
+    const ab = fighterBounds(a,b.x+b.width/2), bb = fighterBounds(b,a.x+a.width/2);
+    const geo = ab.x < bb.x + bb.w && ab.x + ab.w > bb.x && ab.y < bb.y + bb.h && ab.y + ab.h > bb.y;
     if (!geo) return false;
-    const rectA={x:a.x,y:ay,w:a.width,h:ah};
+    const rectA={x:ab.x,y:ab.y,w:ab.w,h:ab.h};
     if (!receiverPixelsTouchRect(b,rectA,a)) return false;
     if (!sonicPixelAttackTouch(a,b,'spin')) return false;
     return true;
@@ -242,6 +245,15 @@ export function resolveSpinVsProjectile(spinner, projectile) {
 
 export function checkSpinDashCollision(attacker, receiver) {
     if (!attacker.isSpinDashActive) return;
+    if (receiver.leafShield?.interceptSpin?.(fighterBounds(attacker, receiver.x))) {
+        attacker.finishSpinDash(true);
+        playSound(hitAudio);
+        return;
+    }
+    if (receiver.handleMeleeVsEddie?.(fighterBounds(attacker,receiver.x),attacker)) {
+        attacker.finishSpinDash(true);
+        return;
+    }
     if (!spinRectsOverlap(attacker, receiver)) return;
 
     // Spin vs Spin se resuelve aparte para que no se convierta en dos golpes normales.
@@ -254,20 +266,20 @@ export function checkSpinDashCollision(attacker, receiver) {
     const verticalForce = attacker.getSpinStat('knockbackY');
     const finalDamage = Math.max(1, Math.round(baseDamage * attacker.spinImpactMultiplier));
 
-    if (receiver.isGuarding) {
-        if (attacker.spinMaxImpact) {
-            // Knuckles Nv.3 limpio: cubrirse reduce el golpe, pero no lo anula.
-            dealDamage(receiver, finalDamage, { attacker, attackName: 'Spin Dash bloqueado - Impacto Max', multiplier: 0.50 });
-            receiver.vx = direction * horizontalForce;
-            receiver.isVulnerable = true;
-            receiver.vulnerableTimer = Math.max(receiver.vulnerableDuration, 36);
-        } else {
-            // Spin normal bloqueado: chip pequeno y empuje.
-            dealDamage(receiver, finalDamage, { attacker, attackName: 'Spin Dash bloqueado', multiplier: 0.10 });
-            receiver.vx = direction * Math.max(3, horizontalForce * 0.35);
-        }
+    const wasGuarding = receiver.isGuarding && receiver.guardType;
+    dealDamage(receiver, finalDamage, {
+        attacker,
+        attackName: wasGuarding ? (attacker.spinMaxImpact ? 'Spin Dash bloqueado - Impacto Max' : 'Spin Dash bloqueado') : `Spin Dash Nv.${level}`,
+        damageCategory: 'spin-dash',
+        guardMultiplier: attacker.spinMaxImpact ? 0.50 : 0.10,
+        impactX: attacker.x + attacker.width / 2,
+        bypassLeaf: true
+    });
+    if (receiver.lastGuardImpact?.front) {
+        attacker.finishSpinDash(true);
+        attacker.sonicSpinHits = 0;
+        return;
     } else {
-        dealDamage(receiver, finalDamage, { attacker, attackName: `Spin Dash Nv.${level}` });
         receiver.vx = direction * horizontalForce;
         receiver.vy = verticalForce;
         receiver.isGrounded = false;
@@ -277,8 +289,8 @@ export function checkSpinDashCollision(attacker, receiver) {
 
 
     // Sonic Nv.3 es la excepcion: puede conectar hasta 3 pasadas.
-    if (attacker.characterId === 'sonic' && level === 3) {
-        const now = performance.now();
+    if (['sonic', 'metal-sonic'].includes(attacker.characterId) && level === 3) {
+        const now = combatNow();
         if (!attacker.sonicSpinLastHit || now - attacker.sonicSpinLastHit > 220) {
             attacker.sonicSpinHits = (attacker.sonicSpinHits || 0) + 1;
             attacker.sonicSpinLastHit = now;
@@ -309,19 +321,18 @@ export function checkTongueCollision(attacker, receiver) {
     if (!attacker.isTongueAttacking) return;
     if (attacker.tonguePhase !== "extend") return;
     if (attacker.tongueHitDone) return;
-    if (!attacker.lastTongueRects || attacker.lastTongueRects.length === 0) return;
     if (!espioSprite3.complete) return;
+    const cells = attacker.getTongueRects?.() ?? [];
 
     const cameraX = game.cameraX;
-    const receiverY = receiver.getCurrentY();
-    const receiverH = receiver.getCurrentHeight();
-    const rx = receiver.x - cameraX;
-    const ry = receiverY;
-    const rw = receiver.width;
-    const rh = receiverH;
+    const bounds = fighterBounds(receiver,attacker.x+attacker.width/2);
+    const rx = bounds.x - cameraX;
+    const ry = bounds.y;
+    const rw = bounds.w;
+    const rh = bounds.h;
     const STEP = 4;
 
-    for (const cell of attacker.lastTongueRects) {
+    for (const cell of cells) {
         if (!cell.isDamageCell) continue;
         if (cell.x + cell.w <= rx || cell.x >= rx + rw || cell.y + cell.h <= ry || cell.y >= ry + rh) continue;
 
@@ -366,60 +377,22 @@ export function checkTongueCollision(attacker, receiver) {
 // ============================
 export function checkBassBulletCollision(bullet, receiver) {
     if (!bullet.active) return;
+    if (receiver.characterId === 'knuckles' &&
+        (receiver.minerPhase === 'under' || receiver.minerPhase === 'warning')) return;
 
-    const receiverY = receiver.getCurrentY();
-    const receiverH = receiver.getCurrentHeight();
-    const rx = receiver.x;
-    const ry = receiverY;
-    const rw = receiver.width;
-    const rh = receiverH;
+    const {x:rx,y:ry,w:rw,h:rh} = fighterBounds(receiver,bullet.owner.x+bullet.owner.width/2);
 
     const bx = bullet.x;
     const by = bullet.y;
     const bw = bullet.width;
     const bh = bullet.height;
 
-    if (!(bx < rx + rw && bx + bw > rx && by < ry + rh && by + bh > ry)) return;
-    if (typeof receiver.pixelBodyIntersectsRect === 'function' &&
+    const hitsShield = receiver.shieldIntersects?.({ x: bx, y: by, w: bw, h: bh });
+    if (!hitsShield && !(bx < rx + rw && bx + bw > rx && by < ry + rh && by + bh > ry)) return;
+    if (!hitsShield && typeof receiver.pixelBodyIntersectsRect === 'function' &&
         !receiver.pixelBodyIntersectsRect({x:bx,y:by,w:bw,h:bh}, bullet.owner.x + bullet.owner.width/2)) return;
 
-    if (!bassSprite3.complete || bassSprite3.naturalWidth === 0) return;
-    const frameNum = bullet.getFrameNum();
-    const c = getCellCoords(frameNum, bassSprite3.naturalWidth, bassSprite3.naturalHeight, 8, 6);
-
-    tongueCtx.clearRect(0, 0, bw, bh);
-    tongueCtx.drawImage(bassSprite3, c.sx, c.sy, c.sw, c.sh, 0, 0, bw, bh);
-
-    let imageData;
-    try {
-        imageData = tongueCtx.getImageData(0, 0, bw, bh);
-    } catch (e) {
-        applyBulletDamage(bullet, receiver);
-        return;
-    }
-
-    const data = imageData.data;
-    const overlapX1 = Math.max(bx, rx);
-    const overlapY1 = Math.max(by, ry);
-    const overlapX2 = Math.min(bx + bw, rx + rw);
-    const overlapY2 = Math.min(by + bh, ry + rh);
-
-    const STEP = 4;
-    for (let py = overlapY1; py < overlapY2; py += STEP) {
-        for (let px = overlapX1; px < overlapX2; px += STEP) {
-            let localX = Math.floor(px - bx);
-            let localY = Math.floor(py - by);
-            // Espejar si va hacia la izquierda
-            if (bullet.vx < 0) localX = bw - 1 - localX;
-            if (localX < 0 || localX >= bw || localY < 0 || localY >= bh) continue;
-            const idx = (localY * bw + localX) * 4;
-            const alpha = data[idx + 3];
-            if (alpha > 0) {
-                applyBulletDamage(bullet, receiver);
-                return;
-            }
-        }
-    }
+    applyBulletDamage(bullet, receiver);
 }
 
 // ============================
@@ -431,44 +404,31 @@ export function applyBulletDamage(bullet, receiver) {
         if (handled || !bullet.active) return;
     }
 
-    if (receiver.isGuarding) {
-        receiver.guardFlashUntil = performance.now() + 180;
-        bullet.active = false;
-        return;
-    }
+    const damage = dealDamage(receiver, bullet.damage, { attacker: bullet.owner, attackName: 'Bass Buster', basicShot: true, impactX: bullet.x + bullet.width / 2, projectile: true, hitRect: { x: bullet.x, y: bullet.y, w: bullet.width, h: bullet.height } });
+    bullet.active = false;
+    if (damage <= 0 || receiver.lastGuardImpact?.blocked || receiver.lastGuardImpact?.broken) return;
 
-    dealDamage(receiver, bullet.damage, { attacker: bullet.owner, attackName: 'Bass Buster' });
+    const now = combatNow();
+    const hits = (receiver.bassBulletHitTimes || []).filter(at => now - at < 4000);
+    hits.push(now);
+    receiver.bassBulletHitTimes = hits;
 
-    receiver.bulletsReceivedInBurst++;
-    receiver.lastBulletHitTime = performance.now();
-
-    const count = receiver.bulletsReceivedInBurst;
     // Dirección del knockback basada en la velocidad horizontal de la bala
     const dir = (bullet.vx > 0) ? 1 : (bullet.vx < 0) ? -1 : (bullet.direction || 1);
 
-    if (count >= 12) {
-        if (!receiver.isGrounded) {
-            receiver.vx = -dir * 15;
-            receiver.vy = -12;
-        } else {
-            receiver.vx = -dir * 18;
-            receiver.vy = 0;
-        }
+    if (hits.length >= 6) {
+        hits.length = 0;
+        receiver.vx = dir * 12;
+        receiver.vy = -8;
         receiver.isGrounded = false;
         receiver.wasInAirFromKnockback = true;
         receiver.knockbackAirTimer = 0;
-    } else if (count >= 6 && count <= 11) {
-        receiver.vx = -dir * 2;
-    } else if (count >= 1 && count <= 5) {
-        receiver.vx = -dir * 1;
-    }
-
-    if (count >= 5) {
         receiver.isVulnerable = true;
         receiver.vulnerableTimer = 30;
+    } else if (!receiver.wasInAirFromKnockback) {
+        receiver.vx = dir * 2.5;
     }
 
-    bullet.active = false;
     playSound(hitAudio);
 }
 
@@ -476,11 +436,20 @@ export function applyBulletDamage(bullet, receiver) {
 // BALAS VS PROYECTILES
 // ============================
 export function checkBulletsVsProjectiles() {
+    const targets = game.projectiles.filter(projectile => projectile.active && projectile.hp > 0);
+    for (const obstacle of targets) {
+        for (const shot of [...game.projectiles, ...game.bassBullets]) {
+            if (!obstacle.active || !shot.active || shot.owner === obstacle.owner || shot.hp != null || !rectsOverlap(shot, obstacle)) continue;
+            obstacle.hp -= shot.damage ?? 3;
+            shot.active = false;
+            if (obstacle.hp <= 0) obstacle.active = false;
+        }
+    }
     for (const proj of game.projectiles) {
         if (!proj.active) continue;
-        if (proj.type === 'shuriken') {
+        if (proj.type === 'shuriken' || (proj.type === 'buster-rock-3' || proj.type === 'buster-zero-3')) {
             for (const bullet of game.bassBullets) {
-                if (!bullet.active) continue;
+                if (!bullet.active || bullet.owner === proj.owner) continue;
                 if (rectsOverlap(bullet, proj)) {
                     bullet.active = false;
                 }

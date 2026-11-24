@@ -1,3 +1,9 @@
+import { chooseBattleStage } from './battle-stages.js';
+import { music } from './music.js';
+import { adventureKey } from './story-platform.js';
+import { openStoryCampaigns } from './story-mode.js';
+import { sonicWalkKey } from './sonic-chapter.js';
+import { combatNow } from './combat-clock.js';
 // ========================================
 // EVENTOS DE TECLADO
 // ========================================
@@ -11,48 +17,189 @@ import { Zero } from './zero.js';
 import { Rock } from './rock.js';
 import { Knuckles } from './knuckles.js';
 import { Bass, Treble } from './bass.js';
-import { startBattle } from './battle.js';
+import { startBattle, returnToCharacterSelect, switchTeamFighter, chooseTrainingTeams } from './battle.js?v=team3-1';
 import { BusterProjectile, getBusterLevel } from './buster-system.js';
 import { getTouchedWall } from './wall-system.js';
+import { selectionIndexAt, canRandomizeSelection, randomSelectionAt } from './selection.js';
+import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, cancelTournament } from './tournament.js';
+import { modeOptionAt, resultActionAt } from './menu-screen.js';
+import { requestTeamAssist } from './team-assists.js';
+import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
+import { toggleBattlePause } from './pause-menu.js';
+import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
+
+function isHumanInputForCpu(event) {
+    if (!event.isTrusted) return false;
+    const red = Object.values(game.p2.controls).includes(event.code) || ['BracketLeft', 'BracketRight', 'Quote'].includes(event.code);
+    return Boolean(red ? game.cpuAgentP2 : game.cpuAgentP1);
+}
+
+function confirmSelectionAndStart() {
+    const s = game.characterSelection;
+    if (s.p1Confirmed && s.p2Confirmed) chooseBattleStage(game, startBattle);
+}
+
+function startRandomBattle() {
+    const [blue, red] = chooseTrainingTeams();
+    if (game.mode === 'team') game.teamRosters = [blue, red];
+    const s = game.characterSelection;
+    s.p1Index = s.chars.indexOf(blue[0]);
+    s.p2Index = s.chars.indexOf(red[0]);
+    s.p1Confirmed = true;
+    s.p2Confirmed = true;
+    chooseBattleStage(game, startBattle);
+}
+
+function confirmFighter(side) {
+    const selection = game.characterSelection;
+    if (game.mode === 'team') {
+        const roster = game.teamRosters[side === 'p1' ? 0 : 1];
+        const id = selection.chars[selection[side + 'Index']];
+        if (game.teamRosters.some(team => team.includes(id))) return;
+        roster.push(id);
+        if (roster.length < 3) return;
+    }
+    selection[side + 'Confirmed'] = true;
+}
+
+function chooseMode(index) {
+    if (index === 5) { openTournamentMenu(); return; }
+    if (index === 3) { openStoryCampaigns(); return; }
+    game.controlOverrides = null;
+    game.modeCursor = index;
+    game.mode = ['cpu', 'local', 'team', 'story', 'practice'][index];
+    game.gameState = GAME_STATE.SELECT;
+    game.teamRosters = [[], []];
+    game.characterSelection.p1Confirmed = false;
+    game.characterSelection.p2Confirmed = false;
+}
+
+function handleResultAction(action) {
+    if (action === 'rematch') startBattle();
+    else if (action === 'characters') returnToCharacterSelect();
+}
+
+function canvasPoint(event) {
+    const canvas = document.getElementById('gameCanvas');
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+    };
+}
 
 export function setupInput() {
+    window.addEventListener('blur', () => {
+        for (const fighter of [game.p1, game.p2]) {
+            if (!fighter) continue;
+            for (const key of Object.keys(fighter.keys)) fighter.keys[key] = false;
+            if (fighter.lastDirectionState) {
+                fighter.lastDirectionState.left = false;
+                fighter.lastDirectionState.right = false;
+            }
+            fighter.busterCharging = false;
+            fighter.busterChargeStart = 0;
+        }
+    });
     window.addEventListener('keydown', (e) => {
+        if(e.isTrusted && tournamentRunning() && e.code==='Escape') { e.preventDefault();cancelTournament();return; }
+        if(e.isTrusted && tournamentSimulationActive()) return;
+        music.unlock();
+        if (sonicWalkKey(e, true) || adventureKey(e, true)) return;
+        if (isCharacterGuideOpen() || game.gameState === GAME_STATE.STORY) return;
+        if (game.gameState === GAME_STATE.BATTLE && e.code === 'Escape' && e.isTrusted) {
+            e.preventDefault();
+            if (!e.repeat) toggleBattlePause();
+            return;
+        }
+        if (game.paused) return;
         if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') return;
-        if (e.code === 'Space' || e.code === 'Enter') e.preventDefault();
+        if (e.code === 'Space' || e.code === 'Enter' ||
+            (game.gameState === GAME_STATE.SELECT && e.code.startsWith('Arrow')) ||
+            (game.gameState === GAME_STATE.MODE && e.code.startsWith('Arrow'))) e.preventDefault();
+
+        if (game.gameState === GAME_STATE.MODE) {
+            if(tournamentRunning()) return;
+            if (e.code === 'KeyG' && !e.repeat) { openCharacterGuide(); return; }
+            if (!e.repeat && ['KeyA', 'ArrowLeft'].includes(e.code)) game.modeCursor = (game.modeCursor + 5) % 6;
+            if (!e.repeat && ['KeyD', 'ArrowRight'].includes(e.code)) game.modeCursor = (game.modeCursor + 1) % 6;
+            if (!e.repeat && ['KeyJ', 'Comma', 'Space', 'Enter'].includes(e.code)) chooseMode(game.modeCursor);
+            return;
+        }
+
+        if (game.gameState === GAME_STATE.RESULT) {
+            if (!e.repeat && ['KeyR', 'Enter'].includes(e.code)) handleResultAction('rematch');
+            if (!e.repeat && ['KeyC', 'Escape'].includes(e.code)) handleResultAction('characters');
+            return;
+        }
 
         // ============================
         // SELECCIÓN
         // ============================
         if (game.gameState === GAME_STATE.SELECT) {
+            if (e.code === 'KeyR' && !e.repeat && canRandomizeSelection()) {
+                startRandomBattle();
+                return;
+            }
+            if (e.code === 'Escape' && !e.repeat) {
+                game.gameState = GAME_STATE.MODE;
+                return;
+            }
             const chars = game.characterSelection.chars;
 
             if (!game.characterSelection.p1Confirmed) {
                 if (e.code === 'KeyA' && !e.repeat) {
-                    game.characterSelection.p1Index = (game.characterSelection.p1Index - 1 + chars.length) % chars.length;
+                    const i = game.characterSelection.p1Index;
+                    const row = Math.floor(i / 4), col = i % 4;
+                    const rowSize = Math.min(4, chars.length - row * 4);
+                    game.characterSelection.p1Index = row * 4 + (col + rowSize - 1) % rowSize;
                 }
                 if (e.code === 'KeyD' && !e.repeat) {
-                    game.characterSelection.p1Index = (game.characterSelection.p1Index + 1) % chars.length;
+                    const i = game.characterSelection.p1Index;
+                    const row = Math.floor(i / 4), col = i % 4;
+                    const rowSize = Math.min(4, chars.length - row * 4);
+                    game.characterSelection.p1Index = row * 4 + (col + 1) % rowSize;
+                }
+                if ((e.code === 'KeyW' || e.code === 'KeyS') && !e.repeat) {
+                    const i = game.characterSelection.p1Index;
+                    const col = i % 4, row = Math.floor(i / 4), rows = Math.ceil(chars.length / 4);
+                    const nextRow = (row + (e.code === 'KeyW' ? rows - 1 : 1)) % rows;
+                    let next = nextRow * 4 + col;
+                    if (next >= chars.length) next = (nextRow * 4) + (col % (chars.length - nextRow * 4));
+                    game.characterSelection.p1Index = next;
                 }
                 if (e.code === 'KeyJ' && !e.repeat) {
-                    game.characterSelection.p1Confirmed = true;
+                    confirmFighter('p1');
                 }
             }
 
             if (!game.characterSelection.p2Confirmed) {
                 if (e.code === 'ArrowLeft' && !e.repeat) {
-                    game.characterSelection.p2Index = (game.characterSelection.p2Index - 1 + chars.length) % chars.length;
+                    const i = game.characterSelection.p2Index;
+                    const row = Math.floor(i / 4), col = i % 4;
+                    const rowSize = Math.min(4, chars.length - row * 4);
+                    game.characterSelection.p2Index = row * 4 + (col + rowSize - 1) % rowSize;
                 }
                 if (e.code === 'ArrowRight' && !e.repeat) {
-                    game.characterSelection.p2Index = (game.characterSelection.p2Index + 1) % chars.length;
+                    const i = game.characterSelection.p2Index;
+                    const row = Math.floor(i / 4), col = i % 4;
+                    const rowSize = Math.min(4, chars.length - row * 4);
+                    game.characterSelection.p2Index = row * 4 + (col + 1) % rowSize;
+                }
+                if ((e.code === 'ArrowUp' || e.code === 'ArrowDown') && !e.repeat) {
+                    const i = game.characterSelection.p2Index;
+                    const col = i % 4, row = Math.floor(i / 4), rows = Math.ceil(chars.length / 4);
+                    const nextRow = (row + (e.code === 'ArrowUp' ? rows - 1 : 1)) % rows;
+                    let next = nextRow * 4 + col;
+                    if (next >= chars.length) next = (nextRow * 4) + (col % (chars.length - nextRow * 4));
+                    game.characterSelection.p2Index = next;
                 }
                 if (e.code === 'Comma' && !e.repeat) {
-                    game.characterSelection.p2Confirmed = true;
+                    confirmFighter('p2');
                 }
             }
 
-            if (game.characterSelection.p1Confirmed && game.characterSelection.p2Confirmed) {
-                startBattle();
-            }
+            confirmSelectionAndStart();
 
             return;
         }
@@ -62,44 +209,69 @@ export function setupInput() {
         // ============================
         if (game.gameState !== GAME_STATE.BATTLE) return;
         if (!game.p1 || !game.p2) return;
+        if (isHumanInputForCpu(e)) return;
+        if (game.countdown && game.countdown.phase !== '0' && game.countdown.phase !== 'go') return;
 
         const p1 = game.p1;
         const p2 = game.p2;
 
+        if (!e.repeat && handleChaosPuddleKey(e.code)) return;
+
+        if (game.teamFighters && !e.repeat) {
+            if (e.code === 'KeyU' || e.code === 'Quote') {
+                const side=e.code==='KeyU'?'p1':'p2';
+                const alternate=Boolean(game[side].keys[game[side].controls.crouch]);
+                requestTeamAssist(side,Number(alternate));
+                return;
+            }
+            if (e.code === 'KeyL') { switchTeamFighter('p1'); return; }
+            if (e.code === 'Slash') { switchTeamFighter('p2'); return; }
+        }
+
         // ROCK — doble abajo abre el mini selector; el tercer input selecciona.
         // abajo+abajo+arriba = CUT/CONCRETE; abajo+abajo+abajo = BASE.
         for (const r of [p1,p2]) {
-            if (r instanceof Rock && !e.repeat && r.handleWeaponSelectorInput(e.code)) return;
+            if (r.characterId === 'rock' && !e.repeat && r.handleWeaponSelectorInput(e.code)) return;
         }
 
-        // Wall Jump exclusivo de X y Zero: mismo boton de salto.
+        // Rebote de pared con el botón de salto para quienes tienen esa técnica.
         for (const [fighter, opponent] of [[p1,p2],[p2,p1]]) {
             if (e.code === fighter.controls.jump && !e.repeat && !fighter.isGrounded) {
                 const wall = getTouchedWall(fighter);
-                if (wall && !fighter.airMobilityLocked) {
+                if (wall && !fighter.airMobilityLocked && !(fighter.wallDetachUntil>combatNow()) && (!['metal-sonic','megaman-zero'].includes(fighter.characterId) || !fighter.isBusy())) {
                     fighter.vy = fighter.jumpForce;
                     // Zigzag de pared: se despega visual/físicamente un poco hacia el lado
                     // contrario y la gravedad/movimiento lo deja volver a tocar el pilar.
                     fighter.vx = wall.side === 'left' ? 7 : -7;
                     fighter.wallSliding = false;
-                    if (fighter instanceof Zero && typeof fighter.startWallHop === 'function') {
-                        fighter.startWallHop(wall.side);
-                    }
+                    fighter.startWallHop?.(wall.side);
                 }
             }
         }
 
         // Buster universal de robots: mantener ataque para cargar, soltar para disparar.
         for (const fighter of [p1,p2]) {
-            if (fighter.hasBuster && !(fighter instanceof Rock && (fighter.weaponSet === 'cut_concrete'||fighter.weaponSet === 'fire'||fighter.weaponSet === 'leaf_snake')) && e.code === fighter.controls.attack && !e.repeat && !fighter.busterCharging) {
+            if (fighter.hasBuster && (fighter.canUseBuster?.() ?? true) && !(fighter instanceof Rock && (fighter.weaponSet === 'cut_concrete'||fighter.weaponSet === 'fire'||fighter.weaponSet === 'leaf_snake')) && e.code === (fighter instanceof Zero ? fighter.controls.kickLight : fighter.controls.attack) && !e.repeat && !fighter.busterCharging) {
                 fighter.busterCharging = true;
-                fighter.busterChargeStart = performance.now();
+                fighter.busterChargeStart = combatNow();
                 fighter.busterChargeLevel = 1;
             }
         }
 
         p1.keys[e.code] = true;
         p2.keys[e.code] = true;
+
+        for (const [fighter, target] of [[p1,p2],[p2,p1]]) {
+            if (e.repeat) continue;
+            if (fighter.characterId === 'megaman-zero') fighter.chooseAttack(e.code,target);
+            if (fighter.characterId === 'silver') fighter.command(e.code,target);
+            if (fighter.characterId === 'chaos') fighter.handleCommand(e.code, target);
+            if (fighter.characterId === 'tails') fighter.handleCommand(e.code, target);
+            if (fighter.characterId === 'sonic' && fighter.handleSonicCommand(e.code,target)) return;
+            if (fighter.characterId === 'wily' && fighter.commandWily(e.code,target)) return;
+            if (fighter.characterId === 'eggman' && fighter.command(e.code, target)) return;
+            if (fighter.characterId === 'metal-sonic' && fighter.handleMetalCommand(e.code, target)) return;
+        }
 
         // ROCK POWER 1 se procesa abajo junto con Rush/Beat.
 
@@ -122,56 +294,66 @@ export function setupInput() {
         // ================================================================
         // BASS - Disparos y Dash
         // ================================================================
-        if (p1 instanceof Bass && p1.state !== "intro") {
-            const dir = p1.x > p2.x ? -1 : 1;
-            const forwardKey = dir === 1 ? 'KeyD' : 'KeyA';
-            const backwardKey = dir === 1 ? 'KeyA' : 'KeyD';
-
-            if (!e.repeat) {
-                // J: disparo (según input de dirección)
-                if (e.code === 'KeyJ') {
-                    if (p1.keys['KeyW'] && p1.keys[forwardKey]) {
-                        p1.tryShoot('up', 'forward');
-                    } else if (p1.keys['KeyW'] && p1.keys[backwardKey]) {
-                        p1.tryShoot('up', 'forward');
-                    } else if (p1.keys['KeyW']) {
-                        p1.tryShoot('up', 'neutral');
-                    } else {
-                        p1.tryShoot('neutral', 'forward');
-                    }
-                }
-
-                // E: diagonal arriba (derecha)
-                if (e.code === 'KeyE' && dir === 1) {
-                    p1.tryShoot('up', 'forward');
-                }
-
-                // Q: diagonal arriba (izquierda)
-                if (e.code === 'KeyQ' && dir === -1) {
-                    p1.tryShoot('up', 'forward');
-                }
-
-                // Doble tap para dash
-                if (e.code === p1.controls.left) {
-                    p1.tryDash('left');
-                }
-                if (e.code === p1.controls.right) {
-                    p1.tryDash('right');
-                }
-
-                // Invocar Treble (I)
-                if (e.code === 'KeyI') {
-                    if (!p1.activeTreble || !p1.activeTreble.isActive) {
-                        p1.summonTreble(p2.x);
-                    }
-                }
+        for (const [bass, opponent] of [[p1, p2], [p2, p1]]) {
+            if (!(bass instanceof Bass) || bass.state === 'intro' || e.repeat) continue;
+            if (opponent.grabConnected && !opponent.grabThrown && opponent.grabTarget === bass) continue;
+            const toward = opponent.x > bass.x ? bass.controls.right : bass.controls.left;
+            const backward = opponent.x > bass.x ? bass.controls.left : bass.controls.right;
+            const jumpHeld = Boolean(bass.keys[bass.controls.jump]);
+            if (e.code === bass.controls.attack) {
+                const vertical = jumpHeld ? 'up' : 'neutral';
+                const horizontal = bass.keys[toward] ? 'forward' : bass.keys[backward] ? 'forward' : 'neutral';
+                bass.tryShoot(vertical, horizontal);
             }
+            const aimLeft = bass === p1 ? 'KeyQ' : 'BracketLeft';
+            const aimRight = bass === p1 ? 'KeyE' : 'BracketRight';
+            if (e.code === aimLeft || e.code === aimRight) {
+                const direction = e.code === aimRight ? 1 : -1;
+                if (jumpHeld || !bass.isGrounded) bass.startJet(direction, true);
+                else if (direction === (toward === bass.controls.right ? 1 : -1)) bass.tryShoot('up', 'forward');
+            }
+            if (e.code === bass.controls.heavy && (!bass.activeTreble || !bass.activeTreble.isActive)) {
+                bass.summonTreble(opponent.x);
+            }
+            if (e.code === bass.controls.spinKey) {
+                const horizontal = (jumpHeld || !bass.isGrounded) && Boolean(bass.keys[toward] || bass.keys[backward]);
+                const direction = horizontal ? (bass.keys[bass.controls.right] ? 1 : -1) : bass.facingLeft ? -1 : 1;
+                bass.startJet(direction, horizontal);
+            }
+            if (e.code === bass.controls.kickLight && bass.keys[bass.controls.crouch]) bass.startBarrier();
+            else if (e.code === bass.controls.kickLight) bass.startRobotAction('punch');
+            if (e.code === bass.controls.kickHeavy) bass.startRobotAction(bass.keys[backward] ? 'dodge' : 'kick');
+        }
+
+        if (!e.repeat) for (const fighter of [p1, p2]) {
+            if (fighter.characterId !== 'emerl' || !fighter.startEmerlMove) continue;
+            if (e.code === fighter.controls.attack && !fighter.hasBuster) fighter.startEmerlMove('punch');
+            if (fighter.rockCopyEnabled) continue;
+            if (e.code === fighter.controls.heavy) fighter.startEmerlMove('waveKick');
+            if (e.code === fighter.controls.kickLight) fighter.startEmerlMove('upper');
+            if (e.code === fighter.controls.kickHeavy) fighter.startEmerlMove(fighter.isGrounded ? 'roundhouse' : 'rocket');
+        }
+
+        if (!e.repeat) for (const [proto, opponent] of [[p1, p2], [p2, p1]]) {
+            if (proto.characterId !== 'protoman' || (opponent.grabConnected && !opponent.grabThrown && opponent.grabTarget === proto)) continue;
+            const back = opponent.x > proto.x ? proto.controls.left : proto.controls.right;
+            if (e.code === proto.controls.kickLight) proto.startRobotAction('punch');
+            if (e.code === proto.controls.kickHeavy) proto.startRobotAction(proto.keys[back] ? 'dodge' : 'bash');
+        }
+        if (!e.repeat) for (const fighter of [p1, p2]) {
+            if (fighter.characterId !== 'x') continue;
+            if (e.code === fighter.controls.kickLight) fighter.startSaber();
+            if (e.code === fighter.controls.kickHeavy) fighter.startNova();
         }
 
         // ================================================================
         // ESPIO
         // ================================================================
         if (p1 instanceof Espio && !e.repeat) {
+            if (p1.keys[p1.controls.crouch]) {
+                const technique={KeyI:'drill',KeyM:'tornado',KeyK:'smoke'}[e.code];
+                if (technique) { p1.startNinjaTechnique(technique,p2); return; }
+            }
             if (e.code === 'KeyJ') {
                 const p1Toward = (p2.x > p1.x) ? 'KeyD' : 'KeyA';
                 if (p1.keys[p1Toward]) {
@@ -205,7 +387,7 @@ export function setupInput() {
             }
 
             if (e.code === 'KeyK') {
-                const now = performance.now();
+                const now = combatNow();
                 const p1Toward = (p2.x > p1.x) ? 'KeyD' : 'KeyA';
                 const recentBackRelease = p1.lastBackReleaseTime && (now - p1.lastBackReleaseTime < 300);
 
@@ -226,6 +408,7 @@ export function setupInput() {
         // J = Punch | I = Top Kick | M = Side Kick | K en aire = Sonic Rocket
         // ================================================================
         if (!e.repeat && p1 instanceof Sonic) {
+            if (e.code===p1.controls.crouch) p1.toggleSonicSuper();
             if (e.code === p1.controls.attack) p1.startPunch();
             if (e.code === p1.controls.heavy) p1.startTopKick();
             if (e.code === p1.controls.kickLight) p1.startSideKick();
@@ -238,6 +421,7 @@ export function setupInput() {
             }
         }
         if (!e.repeat && p2 instanceof Sonic) {
+            if (e.code===p2.controls.crouch) p2.toggleSonicSuper();
             if (e.code === p2.controls.attack) p2.startPunch();
             if (e.code === p2.controls.heavy) p2.startTopKick();
             if (e.code === p2.controls.kickLight) p2.startSideKick();
@@ -253,6 +437,7 @@ export function setupInput() {
         // SHADOW: J combo; I Chaos Control; M upper; K brake/slider; abajo+K TP.
         if(!e.repeat) for(const [f,opp] of [[p1,p2],[p2,p1]]){
             if(!(f instanceof Shadow))continue;
+            f.handleBattleTechnique(e.code,opp);
             if(e.code===f.controls.crouch)f.toggleSuperTap();
             if(e.code===f.controls.attack){
                 f.startShadowChop();
@@ -260,6 +445,7 @@ export function setupInput() {
             if(e.code===f.controls.heavy){if(f.keys[f.controls.crouch])f.startChaosMagic();else f.startChaosNightmare();}
             if(e.code===f.controls.kickLight)f.startChaosUpper();
             if(e.code===f.controls.kickHeavy){
+                if(f.brakeShadowTeleport())continue;
                 if(f.keys[f.controls.crouch]&&f.isGrounded)f.startShadowTeleport(opp);
                 else if(f.isGrounded&&Math.abs(f.vx)>.5){
                     const opposite=(f.vx>0&&f.keys[f.controls.left])||(f.vx<0&&f.keys[f.controls.right]);
@@ -289,6 +475,7 @@ export function setupInput() {
                 if (k.minerPhase === 'under') k.beginMinerExit();
                 else if (k.keys[k.controls.crouch] && k.isGrounded) { k.startMiner(); }
                 else if (!k.isGrounded) { if (k.glide) k.attackFromGlide(); else k.startGlide(k.facingDirection); }
+                else k.startFloorPunch();
             }
         }
 
@@ -301,48 +488,65 @@ export function setupInput() {
         // K/B = Rush Jet | abajo+K/B = Rush Coil
         // ================================================================
         for (const r of [p1,p2]) {
-            if (!(r instanceof Rock) || e.repeat) continue;
-            if (e.code === r.controls.heavy && r.keys['KeyE']) { r.requestEddie(); continue; }
+            if (!(r.characterId === 'rock' || r.rockCopyEnabled) || e.repeat) continue;
+            const upLeft = r === p1 ? 'KeyQ' : 'BracketLeft';
+            const upRight = r === p1 ? 'KeyE' : 'BracketRight';
+            if (e.code === r.controls.heavy && r.keys[upRight]) { r.requestEddie(); continue; }
             if (e.code === r.controls.heavy) {
                 if (r.releaseEddie()) continue;
                 if (r.activeBeat?.state === 'patrol') r.requestBeatDrop();
                 else if (r.keys[r.controls.left] && r.keys[r.controls.right]) r.startBeatPatrol();
                 else r.startBeatCrescent();
             }
-            if (r.weaponSet === 'fire' && e.code === r.controls.attack) {if(r.keys['KeyE']||r.keys['KeyQ'])r.startHeatFire();else r.startFireShot();}
+            if (r.weaponSet === 'fire' && e.code === r.controls.attack) {if(r.keys[upRight]||r.keys[upLeft])r.startHeatFire();else r.startFireShot();}
             if(r.weaponSet==='leaf_snake'&&e.code===r.controls.attack)r.startGreen('snake');
             if (r.weaponSet === 'cut_concrete' && e.code === r.controls.attack) {
-                if (r.keys['KeyE']||r.keys['KeyQ']) r.startConcrete('build_far');
+                // J sola fija lejos; después J+D lanza el Concrete móvil para empujar al rival contra ella.
+                if (r.keys[r.controls.right]) r.startConcrete('moving');
                 else if (r.keys[r.controls.crouch]) r.startConcrete('build_near');
-                else if (r.keys[r.controls.right]) r.startConcrete('moving');
+                else r.startConcrete('build_far');
             }
-            if (e.code === r.controls.kickLight) { if (r.weaponSet === 'cut_concrete') r.startRollingCutter((r.keys['KeyE']||r.keys['KeyQ'])?'upper':'lower'); else if(r.weaponSet === 'fire')r.startFlameSword();else if(r.weaponSet==='leaf_snake')r.startGreen('bomb');else r.startSlashClaw(); }
+            if (e.code === r.controls.kickLight) { if (r.weaponSet === 'cut_concrete') r.startRollingCutter((r.keys[upRight]||r.keys[upLeft])?'upper':'lower'); else if(r.weaponSet === 'fire')r.startFlameSword();else if(r.weaponSet==='leaf_snake')r.startGreen('bomb');else r.startSlashClaw(); }
 
             if (e.code === r.controls.kickHeavy) {
                 if(r.weaponSet==='leaf_snake'&&r.leafShield&&!r.leafShield.thrown){
                     const dx=(r.keys[r.controls.right]?1:0)-(r.keys[r.controls.left]?1:0);
-                    const dy=(r.keys['KeyS']?1:0)-(r.keys['KeyW']?1:0);
-                    const diagonalLeft=r.keys['KeyQ'],diagonalRight=r.keys['KeyE'];
-                    if(diagonalLeft||diagonalRight||dx||dy)r.launchLeaf(diagonalLeft?-1:diagonalRight?1:dx,diagonalLeft||diagonalRight?-1:dy);
+                    const dy=(r.keys[r.controls.crouch]?1:0)-(r.keys[r.controls.jump]?1:0);
+                    const diagonalLeft=r.keys[upLeft],diagonalRight=r.keys[upRight];
+                    r.launchLeaf(diagonalLeft?-1:diagonalRight?1:(dx||(!dy?r.facingDirection:0)),
+                        diagonalLeft||diagonalRight?-1:dy);
                 }else if(r.weaponSet==='leaf_snake'&&!r.leafShield&&!r.keys[r.controls.left]&&!r.keys[r.controls.right]&&!r.keys[r.controls.crouch])r.startGreen('leaf');
                 else if(r.keys[r.controls.crouch] && r.isGrounded) r.startRushCoil();
                 else if(r.keys[r.controls.left]||r.keys[r.controls.right])r.startRushJet(r.keys[r.controls.right]?1:-1);
+                else if(r.isGrounded)r.startRushCoil();
+                else r.startRushJet(r.facingDirection);
             }
         }
 
         // ================================================================
-        // ZERO - prueba del Z-Saber (Buster temporalmente fuera)
-        // J = Slash A | I = Slash B | K = Slash C
+        // ZERO - Z-Saber. El botón de patada ligera carga el Buster.
+        // Adelante + ataque = corte de avance. Abajo + fuerte = corte ascendente.
         // ================================================================
-        if (!e.repeat && p1 instanceof Zero) {
-            if (e.code === p1.controls.attack && p1.isGrounded) p1.startSaberAttack('A');
-            if (e.code === p1.controls.heavy && p1.isGrounded) p1.startSaberAttack('B');
-            if (e.code === p1.controls.kickHeavy) p1.startSaberAttack(p1.isGrounded ? 'C' : 'AIR');
-        }
-        if (!e.repeat && p2 instanceof Zero) {
-            if (e.code === p2.controls.attack && p2.isGrounded) p2.startSaberAttack('A');
-            if (e.code === p2.controls.heavy && p2.isGrounded) p2.startSaberAttack('B');
-            if (e.code === p2.controls.kickHeavy) p2.startSaberAttack(p2.isGrounded ? 'C' : 'AIR');
+        if (!e.repeat) for (const [zero, rival] of [[p1, p2], [p2, p1]]) {
+            if (!(zero instanceof Zero)) continue;
+            const c = zero.controls;
+            const forward = rival.x + rival.width / 2 > zero.x + zero.width / 2 ? c.right : c.left;
+            const aux1=zero.keys[zero===p1?'KeyQ':'BracketLeft'];
+            const aux2=zero.keys[zero===p1?'KeyE':'BracketRight'];
+            const wall=!zero.isGrounded&&getTouchedWall(zero);
+            const down=zero.keys[c.crouch];
+            if (e.code === c.attack && zero.isGrounded) {
+                zero.startSaberAttack(aux1?'THRUST':aux2?'BURST':down?'CROUCH':zero.keys[forward]?'ADVANCE':'A');
+            }
+            if (e.code === c.heavy) {
+                if(wall)zero.startSaberAttack('WALLKICK');
+                else if(zero.isGrounded)zero.startSaberAttack(aux1?'FIREUP':aux2?'ELECUP':down?'UPPER':'B');
+            }
+            if (e.code === c.kickHeavy) {
+                if(wall)zero.startSaberAttack('WALL');
+                else if(!zero.isGrounded)zero.startSaberAttack(aux1?'ICEDIVE':aux2?'FIREDIVE':down?'AIRSPIN':'AIR');
+                else zero.startSaberAttack(aux1?'FROSTDASH':down?'LAND':zero.keys[forward]?'SLIDE':'C');
+            }
         }
 
         // Movimiento común + Spin Dash para cualquier personaje que lo soporte.
@@ -354,7 +558,7 @@ export function setupInput() {
             p1.checkDoubleTap("right", p2.x);
             p1.lastDirectionState.right = true;
         }
-        if (p1.supportsSpin && e.code === p1.controls.spinKey && p1.isCrouching && !e.repeat) {
+        if (p1.supportsSpin && e.code === p1.controls.spinKey && !e.repeat) {
             p1.chargeSpinDash(p2.x, e.code);
         }
 
@@ -374,22 +578,26 @@ export function setupInput() {
             p2.lastDirectionState.right = true;
         }
 
-        if (p2.supportsSpin && e.code === p2.controls.spinKey && p2.isCrouching && !e.repeat) {
+        if (p2.supportsSpin && e.code === p2.controls.spinKey && !e.repeat) {
             p2.chargeSpinDash(p1.x, e.code);
         }
 
         if (!e.repeat && p2 instanceof Espio) {
+            if (p2.keys[p2.controls.crouch]) {
+                const technique={Period:'drill',Minus:'tornado',Equal:'smoke'}[e.code];
+                if (technique) { p2.startNinjaTechnique(technique,p1); return; }
+            }
             if (e.code === 'Comma') {
                 if (p2.keys[p2Toward]) {
                     p2.startTongueAttack("forward", p1.x);
-                } else if (p2.keys['KeyQ'] || p2.keys['KeyE']) {
+                } else if (p2.keys['BracketLeft'] || p2.keys['BracketRight']) {
                     p2.startTongueAttack("up", p1.x);
                 } else {
                     p2.startJab();
                 }
             }
 
-            if ((e.code === 'KeyQ' || e.code === 'KeyE') && p2.keys['Comma']) {
+            if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && p2.keys['Comma']) {
                 p2.startTongueAttack("up", p1.x);
             }
 
@@ -410,7 +618,7 @@ export function setupInput() {
             }
 
             if (e.code === 'Equal') {
-                const now = performance.now();
+                const now = combatNow();
                 const recentBackRelease = p2.lastBackReleaseTime && (now - p2.lastBackReleaseTime < 300);
 
                 if (p2.isGrounded && !p2.isBusy() && recentBackRelease && p2.keys[p2Toward]) {
@@ -427,17 +635,38 @@ export function setupInput() {
     });
 
     window.addEventListener('keyup', (e) => {
+        if (sonicWalkKey(e, false) || adventureKey(e, false)) return;
+        if (game.paused) return;
+        if (game.gameState === GAME_STATE.BATTLE && game.p1 && game.p2 && isHumanInputForCpu(e)) return;
         for(const f of [game.p1,game.p2])if(f instanceof Shadow&&e.code===f.controls.heavy)f.releaseChaosMagic();
 
-        if (game.gameState !== GAME_STATE.BATTLE) return;
         if (!game.p1 || !game.p2) return;
 
         const p1 = game.p1;
         const p2 = game.p2;
 
+        p1.keys[e.code] = false;
+        p2.keys[e.code] = false;
+        for (const [fighter, target] of [[p1,p2],[p2,p1]]) {
+            if (fighter.characterId === 'tails' && e.code === fighter.auxShot) fighter.releaseShot(target);
+            if (fighter.characterId === 'megaman-zero' && game.gameState===GAME_STATE.BATTLE) fighter.releaseWeapon(e.code,target);
+        }
+        if (game.gameState !== GAME_STATE.BATTLE) return;
+        if (game.countdown && game.countdown.phase !== '0' && game.countdown.phase !== 'go') return;
+
         for (const [fighter, opponent] of [[p1,p2],[p2,p1]]) {
-            if (fighter.hasBuster && !(fighter instanceof Rock && (fighter.weaponSet === 'cut_concrete'||fighter.weaponSet === 'fire'||fighter.weaponSet === 'leaf_snake')) && e.code === fighter.controls.attack && fighter.busterCharging) {
+            if (fighter.hasBuster && !(fighter instanceof Rock && (fighter.weaponSet === 'cut_concrete'||fighter.weaponSet === 'fire'||fighter.weaponSet === 'leaf_snake')) && e.code === (fighter instanceof Zero ? fighter.controls.kickLight : fighter.controls.attack) && fighter.busterCharging) {
                 const level = getBusterLevel(fighter);
+                if(fighter.canUseBuster && !fighter.canUseBuster()){
+                    fighter.busterCharging=false;
+                    fighter.busterChargeStart=0;
+                    continue;
+                }
+                if (fighter instanceof Rock && level===1 && combatNow()-(fighter.lastBasicShotAt??-Infinity)<180) {
+                    fighter.busterCharging=false;
+                    fighter.busterChargeStart=0;
+                    continue;
+                }
                 fighter.busterChargeLevel = level;
                 const direction = opponent.x > fighter.x ? 1 : -1;
                 game.projectiles.push(new BusterProjectile(fighter, level, direction));
@@ -447,29 +676,29 @@ export function setupInput() {
             }
         }
 
-        // Spin cancel: al soltar agacharse sosteniendo direccion OPUESTA al lanzamiento,
-        // la carga se cancela sin dash. Si hay fuego en contacto, comienza a extinguirse.
+        // Al soltar abajo se elige la dirección. Atrás + botón de giro cancela la carga.
         for(const fighter of [p1,p2])if(e.code===fighter.controls.crouch){
           const opposite=fighter.spinDirection>0?fighter.controls.left:fighter.controls.right;
-          if(fighter.isSpinning&&fighter.spinChargeLevel>0&&fighter.keys[opposite]){
+          if(fighter.isSpinning&&fighter.spinChargeLevel>0&&fighter.keys[opposite]&&fighter.keys[fighter.controls.spinKey]){
             fighter.stopSpinChargeSound?.();fighter.isSpinning=false;fighter.isSpinDashActive=false;
             fighter.spinChargeLevel=0;fighter.vx=0;
             for(const rock of [p1,p2])if(rock instanceof Rock&&rock!==fighter){
-              for(const fx of rock.fireEffects||[])if(fx.kind==='ground'&&fx.active&&Math.abs(fx.x-(fighter.x+fighter.width/2))<fighter.width*.65+fx.scale*18){fx.state='extinguishing';fx.stateAt=performance.now();}
+              for(const fx of rock.fireEffects||[])if(fx.kind==='ground'&&fx.active&&Math.abs(fx.x-(fighter.x+fighter.width/2))<fighter.width*.65+fx.scale*18){fx.state='extinguishing';fx.stateAt=combatNow();}
             }
-          }else fighter.releaseSpinDash();
+          }else fighter.releaseSpinDash(Number(Boolean(fighter.keys[fighter.controls.right]))-
+            Number(Boolean(fighter.keys[fighter.controls.left])));
         }
 
         const p1OpponentIsRight = p2.x > p1.x;
         const p1Backward = p1OpponentIsRight ? 'KeyA' : 'KeyD';
         if (e.code === p1Backward) {
-            if (p1.isGrounded) p1.lastBackReleaseTime = performance.now();
+            if (p1.isGrounded) p1.lastBackReleaseTime = combatNow();
         }
 
         const p2OpponentIsRight = p1.x > p2.x;
         const p2Backward = p2OpponentIsRight ? 'ArrowLeft' : 'ArrowRight';
         if (e.code === p2Backward) {
-            if (p2.isGrounded) p2.lastBackReleaseTime = performance.now();
+            if (p2.isGrounded) p2.lastBackReleaseTime = combatNow();
         }
 
         if (e.code === p1.controls.left) p1.lastDirectionState.left = false;
@@ -477,7 +706,56 @@ export function setupInput() {
         if (e.code === p2.controls.left) p2.lastDirectionState.left = false;
         if (e.code === p2.controls.right) p2.lastDirectionState.right = false;
 
-        p1.keys[e.code] = false;
-        p2.keys[e.code] = false;
     });
+
+    const canvas = document.getElementById('gameCanvas');
+    canvas.addEventListener('pointermove', (e) => {
+        const p = canvasPoint(e);
+        if (game.gameState === GAME_STATE.MODE) {
+            const mode = modeOptionAt(p.x, p.y);
+            if (mode >= 0) game.modeCursor = mode;
+            return;
+        }
+        if (game.gameState !== GAME_STATE.SELECT) return;
+        const s = game.characterSelection;
+        const p1Index = selectionIndexAt(p.x, p.y, 1);
+        const p2Index = selectionIndexAt(p.x, p.y, 2);
+        if (!s.p1Confirmed && p1Index >= 0) s.p1Index = p1Index;
+        if (!s.p2Confirmed && p2Index >= 0) s.p2Index = p2Index;
+    });
+
+    canvas.addEventListener('pointerdown', (e) => {
+        music.unlock();
+        const p = canvasPoint(e);
+        if (game.gameState === GAME_STATE.MODE) {
+            if(tournamentRunning()) return;
+            if (guideButtonAt(p.x, p.y)) { openCharacterGuide(); return; }
+            const mode = modeOptionAt(p.x, p.y);
+            if (mode >= 0) chooseMode(mode);
+            return;
+        }
+        if (!game.paused && game.gameState === GAME_STATE.BATTLE && handleChaosPuddlePointer(p.x,p.y)) return;
+        if (game.gameState === GAME_STATE.RESULT) {
+            const action = resultActionAt(p.x, p.y);
+            if (action) handleResultAction(action);
+            return;
+        }
+        if (game.gameState !== GAME_STATE.SELECT) return;
+        if (randomSelectionAt(p.x, p.y)) {
+            startRandomBattle();
+            return;
+        }
+        const s = game.characterSelection;
+        const p1Index = selectionIndexAt(p.x, p.y, 1);
+        const p2Index = selectionIndexAt(p.x, p.y, 2);
+        if (p1Index >= 0 && !s.p1Confirmed) { s.p1Index = p1Index; confirmFighter('p1'); }
+        else if (p2Index >= 0 && !s.p2Confirmed) { s.p2Index = p2Index; confirmFighter('p2'); }
+        confirmSelectionAndStart();
+    });
+}
+
+export function dispatchCpuTap(code) {
+    if (game.paused || game.gameState !== GAME_STATE.BATTLE || !['0', 'go'].includes(game.countdown?.phase)) return;
+    window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+    window.setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true })), 90);
 }

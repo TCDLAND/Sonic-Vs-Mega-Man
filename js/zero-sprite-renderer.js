@@ -1,6 +1,7 @@
 // Renderer de Zero para frames de tamaño variable dentro de una sola hoja.
-import { zeroMasterSheet } from './assets.js';
 import { getZeroFrames } from './zero-frame-data.js';
+const zeroMasterSheet = new Image();
+zeroMasterSheet.src = 'assets/images/Zerosprites.png';
 
 export const ZERO_RENDER_SCALE = 3;
 

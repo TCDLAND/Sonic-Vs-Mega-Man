@@ -1,4 +1,6 @@
-import { FLOOR_Y, worldWidth } from './config.js';
+import { combatNow } from './combat-clock.js';
+import { captureTournamentTool } from './tournament-damage.js';
+import { worldWidth } from './config.js';
 import { initBuster, getBusterLevel } from './buster-system.js';
 import { configureCombatant, dealDamage } from './combat-system.js';
 import { PrototypeFighter } from './prototype-fighter.js';
@@ -10,7 +12,7 @@ const load=(src)=>{const i=new Image();i.src=src;return i;};
 // Las hojas MM7 miran a la IZQUIERDA de origen. Los 4 morados estructurales
 // (#841584, #470047, #B440B4, #640664) ya están convertidos a alpha.
 // Los márgenes ya no existen en los PNG usados por el juego.
-const S={
+export const ROCK_SHEETS={
  intro:{img:load('assets/images/rock_intro.png'),n:6,cw:48,ch:48,gap:0,start:0,pivotX:24,pivotY:48,sourceFacing:-1},
  idle:{img:load('assets/images/rock_idle.png'),n:4,cw:48,ch:48,gap:0,start:0,pivotX:24,pivotY:48,sourceFacing:-1},
  run:{img:load('assets/images/rock_run.png'),n:10,cw:48,ch:48,gap:0,start:0,pivotX:24,pivotY:48,sourceFacing:-1},
@@ -29,6 +31,7 @@ const S={
  hit:{img:load('assets/images/rock_hit.png'),n:1,cw:48,ch:56,gap:0,start:0,pivotX:24,pivotY:48,sourceFacing:-1},
  airhit:{img:load('assets/images/rock_air_hit.png'),n:1,cw:48,ch:64,gap:0,start:0,pivotX:24,pivotY:48,sourceFacing:-1}
 };
+const S=ROCK_SHEETS;
 
 const P=[
  ['#404040','#f8b840','#a82010','#90d8f8','#30c0d8','#1890a8','#0088f0','#0040d0','#003060','#f8b080','#d07048','#804020','#f0f0f0','#989898','#282828'],
@@ -42,7 +45,8 @@ const P=[
  ['#404040','#f8b840','#a82010','#d5dde1','#dde0e1','#b2babc','#2eda00','#1e8f00','#135a00','#f8b080','#d07048','#804020','#f0f0f0','#989898','#282828']
 ];
 const hexRGB=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
-const paletteRGB=P.map(a=>a.map(hexRGB));
+export const rockPaletteRGB=P.map(a=>a.map(hexRGB));
+const paletteRGB=rockPaletteRGB;
 const recolorCache=new WeakMap();
 function recolored(img,paletteIndex){
  if(paletteIndex===0||!img.complete||!img.naturalWidth)return img;
@@ -61,10 +65,13 @@ const CUTTER_IMG=load('assets/images/cutter.png');
 const CONCRETE_IMG=load('assets/images/concreto.png'); // 352x32 = 11 frames de 32x32
 const CONCRETE_TRAIL_IMG=load('assets/images/piedras_de_suelo.png'); // 384x32, 12 frames; piedras VFX, fuente L->R
 
-class RollingCutter{
+export function rollingCutterScale(fighter) { return fighter.height / 48; }
+
+export class RollingCutter{
  constructor(owner,arc='lower'){
   this.owner=owner;this.type='rolling-cutter';this.damage=10;this.projectileForce=5;this.active=true;
-  this.direction=owner.facingDirection||1;this.arc=arc;this.scale=owner.height/48;this.width=32*this.scale;this.height=16*this.scale;
+  this.hitFighters=new WeakSet();
+  this.direction=owner.facingDirection||1;this.arc=arc;this.scale=rollingCutterScale(owner);this.width=32*this.scale;this.height=16*this.scale;
   const rockFrame=owner._frameFor?.('cutshot',1),localX=11,localY=23,localW=21;
   this.x=rockFrame?(rockFrame.flipX?rockFrame.dx+(rockFrame.sw-(localX+localW))*this.scale:rockFrame.dx+localX*this.scale):owner.x+owner.width/2;
   this.y=rockFrame?rockFrame.dy+localY*this.scale:owner.getCurrentY()+owner.getCurrentHeight()*.35;
@@ -90,25 +97,27 @@ class RollingCutter{
    const baseY=this.returnStartY+(ty-this.returnStartY)*p;
    const sign=this.arc==='upper'?1:-1; // upper sale ∩ y vuelve U; lower sale U y vuelve ∩.
    this.y=baseY+sign*amp*Math.sin(Math.PI*p);
-   if(p>=1){this.active=false;this.owner.cutterCooldownUntil=performance.now()+500;}
+   if(p>=1){this.active=false;this.owner.cutterCooldownUntil=combatNow()+500;}
   }
-  if(this.age>110){this.active=false;this.owner.cutterCooldownUntil=performance.now()+500;}
+  if(this.age>110){this.active=false;this.owner.cutterCooldownUntil=combatNow()+500;}
  }
  _frameIndex(){return (this.animStart+Math.floor(this.age/3))%9;}
  getPixelBodyFrame(){if(!CUTTER_IMG.complete||!CUTTER_IMG.naturalWidth)return null;const sw=32,sh=16,dw=sw*this.scale,dh=sh*this.scale;return {img:CUTTER_IMG,sx:this._frameIndex()*sw,sy:0,sw,sh,dx:this.x,dy:this.y,dw,dh,flipX:this.direction<0};}
  pixelHitsTarget(target){const a=this.getPixelBodyFrame(),b=target?.getPixelBodyFrame?.(this.owner.x+this.owner.width/2);return b?opaqueFramesOverlap(a,b,null,1):true;}
  onHit(target){
+  this._beginReturn();
+  if(target.lastGuardImpact?.front)return false;
   const dx=this.x-this.prevX,dy=this.y-this.prevY;
   // El knockback sigue la lectura de la curva: si el Cutter viene subiendo, levanta;
   // si viene bajando, barre horizontalmente en la direccion real de su recorrido (puede acercar o alejar).
   if(dy<-.35){target.vx=Math.sign(dx||this.direction)*4;target.vy=-13;}
   else{target.vx=Math.sign(dx||this.direction)*12;target.vy=-2.5;}
   target.isGrounded=false;target.wasInAirFromKnockback=true;target.knockbackAirTimer=0;
-  this._beginReturn();return false;
+  return false;
  }
  draw(cameraX){const f=this.getPixelBodyFrame();if(!f)return;ctx.save();ctx.imageSmoothingEnabled=false;const dx=f.dx-cameraX;if(f.flipX){ctx.translate(dx+f.dw,0);ctx.scale(-1,1);ctx.drawImage(f.img,f.sx,f.sy,f.sw,f.sh,0,f.dy,f.dw,f.dh);}else ctx.drawImage(f.img,f.sx,f.sy,f.sw,f.sh,dx,f.dy,f.dw,f.dh);ctx.restore();}
 }
-class ConcreteBlock{
+export class ConcreteBlock{
  constructor(owner,kind='moving'){
   this.owner=owner;this.kind=kind;this.type=`concrete-${kind}`;this.flightScale=owner.height/48;this.direction=owner.facingDirection||1;
   this.frame=0;this.state='flight';this.age=0;this.active=true;this.hp=20;this.maxHp=20;this.damageMultiplier=.80;this.hitTarget=false;this.hitTargetRef=null;this.wallBonusSpent=false;
@@ -135,14 +144,19 @@ class ConcreteBlock{
    // Tres Concrete: MOVING nace muy cerca para poder montarlo; BUILD_NEAR cerca; BUILD_FAR prepara espacio a distancia.
    const p=Math.min(1,this.age/18);
    const travel=(this.kind==='moving'?26:this.kind==='build_near'?58:150)*this.flightScale;
-   this.x=this.startX+this.direction*travel*p;
+   const targetX=this.startX+this.direction*travel;
+   const [leftWall,rightWall]=HIGHWAY_WALLS;
+   const solidOffset=25;
+   const landingX=this.kind==='moving'?targetX:Math.max(leftWall.x-solidOffset,
+    Math.min(rightWall.x-solidOffset-this.solidSize,targetX));
+   this.x=this.startX+(landingX-this.startX)*p;
    const targetSurface=this._findSurfaceY(),groundY=targetSurface-32*this.flightScale;
    this.y=this.startY+(groundY-this.startY)*p-24*this.flightScale*Math.sin(Math.PI*p);
    this.frame=p<.34?0:p<.68?1:2;
    if(p>=1){this.surfaceY=targetSurface;this.state='forming';this.formedAt=this.age;this.frame=3;this.y=this.surfaceY-32*this.flightScale;}
   }else if(this.state==='forming'){
    const e=this.age-this.formedAt;this.frame=e<4?3:e<8?4:e<12?5:6;
-   if(e>=12){this.state=this.kind==='moving'?'moving':'solid';this.frame=6;this.solidAtMs=performance.now();this.nextDecayAt=this.solidAtMs+5000;this.y=this.surfaceY-32*5;}
+   if(e>=12){this.state=this.kind==='moving'?'moving':'solid';this.frame=6;this.solidAtMs=combatNow();this.nextDecayAt=this.solidAtMs+5000;this.y=this.surfaceY-32*5;}
   }else if(this.state==='moving'){
    const dx=this.direction*3.2*this.flightScale;this.x+=dx;this.lastMoveX=dx;this.frame=this._damageFrame();this.y=this.surfaceY-32*5;
    const r=this.platformRect;
@@ -151,7 +165,7 @@ class ConcreteBlock{
    if(this.hitTargetRef&&!this.wallBonusSpent){
     const t=this.hitTargetRef,tw=t.width||48;
     t.x=this.direction>0?r.x+r.w+2:r.x-tw-2;t.y=this.surfaceY-(t.height||t.getCurrentHeight?.()||48);t.vx=dx;t.vy=0;t.isGrounded=false;t.wasInAirFromKnockback=true;t.knockbackAirTimer=0;
-    let targetAtWall=(this.direction<0&&t.x<=226)||(this.direction>0&&t.x+tw>=2368);
+    let targetAtWall=(this.direction<0&&t.x<=HIGHWAY_WALLS[0].x)||(this.direction>0&&t.x+tw>=HIGHWAY_WALLS[1].x);
     // Un Concrete de construcción también cuenta como pared: permite preparar el escenario y encerrar.
     for(const c of this.owner.concretes){
      if(c===this||!c.active||!c.isPlatform()||c.state==='moving')continue;
@@ -162,16 +176,16 @@ class ConcreteBlock{
       if(this.direction<0&&front<=cr.x+cr.w+4&&t.x+tw>cr.x+cr.w)targetAtWall=true;
      }
     }
-    if(targetAtWall){for(const c of this.owner.concretes){if(c!==this&&c.active&&c.isPlatform()&&c.kind!=='moving'){const cr=c.platformRect,front=this.direction>0?t.x+tw:t.x;if(t.y+(t.height||48)>cr.y&&t.y<cr.y+cr.h&&Math.abs(front-(this.direction>0?cr.x:cr.x+cr.w))<16)c.break(true);}}dealDamage(t,5,{attacker:this.owner,attackName:'Concrete Wall Impact'});t.vx=this.direction*5;t.vy=-15;t.isGrounded=false;t.wasInAirFromKnockback=true;t.knockbackAirTimer=0;this.wallBonusSpent=true;this.hitTargetRef=null;this.break(true);return;}
+    if(targetAtWall){for(const c of this.owner.concretes){if(c!==this&&c.active&&c.isPlatform()&&c.kind!=='moving'){const cr=c.platformRect,front=this.direction>0?t.x+tw:t.x;if(t.y+(t.height||48)>cr.y&&t.y<cr.y+cr.h&&Math.abs(front-(this.direction>0?cr.x:cr.x+cr.w))<16)c.break(true);}}dealDamage(t,5,{attacker:this.owner,attackName:'Concrete Wall Impact',impactX:this.x});if(!t.lastGuardImpact?.front){t.vx=this.direction*5;t.vy=-15;t.isGrounded=false;t.wasInAirFromKnockback=true;t.knockbackAirTimer=0;}this.wallBonusSpent=true;this.hitTargetRef=null;this.break(true);return;}
    }
    // El Concrete móvil se pulveriza al tocar una pared real O un Concrete construido.
-   let blocked=r.x<=226||r.x+r.w>=2368;
+   let blocked=r.x<=HIGHWAY_WALLS[0].x||r.x+r.w>=HIGHWAY_WALLS[1].x;
    if(!blocked){for(const c of this.owner.concretes){if(c===this||!c.active||!c.isPlatform()||c.state==='moving')continue;const cr=c.platformRect;if(r.x<cr.x+cr.w&&r.x+r.w>cr.x&&r.y<cr.y+cr.h&&r.y+r.h>cr.y){blocked=true;c.break(true);break;}}}
    if(blocked)this.break(true);
   }else if(this.state==='solid'){
    this.frame=this._damageFrame();this.y=this.surfaceY-32*5;
    // Tras 5 s comienza el desgaste: -10% de HP máximo cada segundo.
-   const now=performance.now();if(now>=this.nextDecayAt){const ticks=Math.floor((now-this.nextDecayAt)/1000)+1;this.nextDecayAt+=ticks*1000;this.hp-=this.maxHp*.10*ticks;if(this.hp<=0)this.break(false);}
+   const now=combatNow();if(now>=this.nextDecayAt){const ticks=Math.floor((now-this.nextDecayAt)/1000)+1;this.nextDecayAt+=ticks*1000;this.hp-=this.maxHp*.10*ticks;if(this.hp<=0)this.break(false);}
   }else if(this.state==='breaking'){
    const e=this.age-this.breakAt;this.frame=e<10?9:10;if(e>28)this.active=false;
   }
@@ -179,10 +193,10 @@ class ConcreteBlock{
  _damageFrame(){const ratio=this.hp/this.maxHp;if(ratio>.70)return 6;if(ratio>.20)return 7;return 8;}
  isPlatform(){return this.active&&(this.state==='solid'||this.state==='moving');}
  takeDamage(raw,{breaksConcrete=false}={}){if(!this.isPlatform())return false;const dmg=breaksConcrete?this.hp:Math.max(0.1,raw*this.damageMultiplier);this.hp-=dmg;if(this.hp<=0.8)this.break(false);return true;}
- break(wall=false){if(this.state==='breaking'||!this.active)return;this.hp=0;this.state='breaking';this.breakAt=this.age;this.frame=9;if(this.kind==='moving')this.owner.concreteMovingCooldownUntil=performance.now()+2800;}
+ break(wall=false){if(this.state==='breaking'||!this.active)return;this.hp=0;this.state='breaking';this.breakAt=this.age;this.frame=9;if(this.kind==='moving')this.owner.concreteMovingCooldownUntil=combatNow()+2800;}
  tryHit(target){
   if(this.kind!=='moving'||this.state!=='moving'||this.hitTarget||!target)return false;const r=this.platformRect,ty=target.getCurrentY(),th=target.getCurrentHeight();
-  if(r.x<target.x+target.width&&r.x+r.w>target.x&&r.y<ty+th&&r.y+r.h>ty){dealDamage(target,8,{attacker:this.owner,attackName:'Concrete Shot'});target.vx=this.direction*4;target.vy=0;target.isGrounded=false;target.wasInAirFromKnockback=true;target.knockbackAirTimer=0;this.hitTarget=true;this.hitTargetRef=target;return true;}return false;
+  if(r.x<target.x+target.width&&r.x+r.w>target.x&&r.y<ty+th&&r.y+r.h>ty){dealDamage(target,8,{attacker:this.owner,attackName:'Concrete Shot',projectile:true,impactX:this.x+this.width/2});if(!target.lastGuardImpact?.front){target.vx=this.direction*4;target.vy=0;target.isGrounded=false;target.wasInAirFromKnockback=true;target.knockbackAirTimer=0;}this.hitTarget=true;if(!target.lastGuardImpact?.front)this.hitTargetRef=target;return true;}return false;
  }
  draw(cameraX){
   if(!CONCRETE_IMG.complete)return;const scale=this.renderScale,dw=32*scale,dh=32*scale,dx=this.x-cameraX;
@@ -199,7 +213,7 @@ class ConcreteBlock{
 // Las hojas de Rush ya vienen limpias, sin márgenes y con alpha.
 // Excepto Jet, el punto de suelo de Rush está 2 px arriba del borde inferior.
 // ================================================================
-const RUSH_S={
+export const RUSH_S={
  intro:{img:load('assets/images/rush_Intro.png'),n:11,cw:48,ch:64,pivotX:24,pivotY:62,sourceFacing:1},
  run:{img:load('assets/images/rush_run.png'),n:6,cw:80,ch:48,pivotX:40,pivotY:46,sourceFacing:1},
  coil:{img:load('assets/images/rush_coil.png'),n:6,cw:48,ch:48,pivotX:24,pivotY:46,sourceFacing:1},
@@ -209,11 +223,11 @@ const RUSH_S={
 
 class RushCompanion{
  constructor(owner){
-  this.owner=owner; this.scale=owner.height/48;
+  this.owner=owner; this.scale=Math.max(1,owner.height/48-1);
   this.x=owner.x+owner.width/2-(owner.facingDirection||1)*owner.width;
   // Pivote físico único: suelo real del escenario. Todas las hojas salvo Jet usan 2 px desde abajo.
   this.y=owner.feetY;
-  this.vx=0; this.vy=0; this.state='intro'; this.stateAt=performance.now();
+  this.vx=0; this.vy=0; this.state='intro'; this.stateAt=combatNow();
   this.facing=owner.facingDirection||1;
   this.ownerAirHandled=!owner.isGrounded;this.jumpReady=true;this.jumpHit=false;this.jumpDirection=1;
   this.jetHit=false; this.jetStartX=this.x; this.jetNeedsReturn=false;
@@ -222,14 +236,14 @@ class RushCompanion{
  }
  _floor(){return this.owner.feetY;}
  _followX(){return this.owner.x+this.owner.width/2-(this.owner.facingDirection||1)*this.owner.width;}
- _setState(s){if(this.state===s)return;this.state=s;this.stateAt=performance.now();}
+ _setState(s){if(this.state===s)return;this.state=s;this.stateAt=combatNow();}
  _ground(){this.y=this._floor();this.vy=0;}
  _commandFree(){return this.state==='idle'||this.state==='run';}
  startCoil(){
-  const now=performance.now();
+  const now=combatNow();
   if(!this._commandFree()||now<this.coilCooldownUntil)return false;
   // COIL ES ATÓMICO: Rush se transforma EXACTAMENTE donde está. No TP, no corre hacia Rock.
-  this.vx=0;this.vy=0;this._ground();this.coilUntil=performance.now()+6000;
+  this.vx=0;this.vy=0;this._ground();this.coilUntil=combatNow()+6000;
   this.lastCommand='coil';this._setState('coil_start');return true;
  }
  startJet(direction){
@@ -251,7 +265,7 @@ class RushCompanion{
   this.facing=this.owner.facingDirection||1;this.vy=-10;this.vx=this.facing*11.5;this._setState('jump');return true;
  }
  _anim(){
-  const now=performance.now(),e=now-this.stateAt;
+  const now=combatNow(),e=now-this.stateAt;
   if(this.state==='intro'){
    const f=Math.min(10,Math.floor(e/65));
    if(e>=11*65){this._setState('idle');return ['intro',7];}
@@ -291,7 +305,7 @@ class RushCompanion{
   // Aproximadamente 32 px desde abajo; sólo mitad izquierda y píxel real del resorte.
   const springRegion={x:0,y:(48-34)/48,w:.5,h:6/48};
   if(opaqueRegionInRect(f,springRegion,point,1)){
-   this.owner.vy=-19;this.owner.isGrounded=false;this.owner.jumpStartedAt=performance.now();
+   this.owner.vy=-19;this.owner.isGrounded=false;this.owner.jumpStartedAt=combatNow();
    this._setState('coil_bounce');
   }
  }
@@ -303,7 +317,7 @@ class RushCompanion{
   this.lastCommand=null;this._setState('idle');
  }
  update(opponent){
-  const now=performance.now(),floor=this._floor();
+  const now=combatNow(),floor=this._floor();
 
   if(this.state==='intro'){
    this._ground();this._anim();
@@ -383,7 +397,7 @@ class RushCompanion{
    const mine=this.getPixelBodyFrame(),target=receiver.getPixelBodyFrame?.(this.x);
    if(mine&&target&&opaqueFramesOverlap(mine,target,null,2)){
     this.jumpHit=true;dealDamage(receiver,7,{attacker:this.owner,attackName:'Rush Jump',impactX:this.x,impactY:this.y-20*this.scale});
-    const side=(receiver.x+receiver.width/2>=this.x)?1:-1;receiver.vx=side*8;return true;
+    const side=(receiver.x+receiver.width/2>=this.x)?1:-1;if(!receiver.lastGuardImpact?.front)receiver.vx=side*8;return true;
    }
   }
   if(this.state!=='jet'||this.jetHit)return false;
@@ -391,7 +405,7 @@ class RushCompanion{
   let hit=target?opaqueFramesOverlap(mine,target,null,2):false;
   if(!target){const r={x:receiver.x,y:receiver.getCurrentY(),w:receiver.width,h:receiver.getCurrentHeight()};hit=opaqueRegionInRect(mine,{x:0,y:0,w:1,h:1},r,2);}
   if(!hit)return false;
-  dealDamage(receiver,10,{attacker:this.owner,attackName:'Rush Jet'});receiver.vx=this.facing*2.5;receiver.vy=-15;receiver.isGrounded=false;receiver.wasInAirFromKnockback=true;receiver.knockbackAirTimer=0;this.jetHit=true;this._setState('return');return true;
+  dealDamage(receiver,10,{attacker:this.owner,attackName:'Rush Jet',impactX:this.x+this.width/2});if(!receiver.lastGuardImpact?.front){receiver.vx=this.facing*2.5;receiver.vy=-15;receiver.isGrounded=false;receiver.wasInAirFromKnockback=true;receiver.knockbackAirTimer=0;}this.jetHit=true;this._setState('return');return true;
  }
  draw(){
   const f=this.getPixelBodyFrame();if(!f)return;
@@ -415,7 +429,7 @@ class IndependentRushJet{
 // FOLLOW queda SIEMPRE detrás de Rock y no copia su salto: mantiene su altura.
 // I/Y = Crescent. Izquierda+Derecha+I/Y = Patrol horizontal.
 // ================================================================
-const BEAT_S={
+export const BEAT_S={
  idle:{img:load('assets/images/beat_idle.png'),n:6,cw:32,ch:32,sourceFacing:1},
  lados:{img:load('assets/images/beat_lados.png'),n:15,cw:48,ch:48,sourceFacing:1}
 };
@@ -424,7 +438,7 @@ class BeatCompanion{
  constructor(owner){
   this.owner=owner;this.scale=owner.height/48;
   this.x=this._followX();this.y=this._followY();
-  this.state='intro';this.stateAt=performance.now();this.eddieCarry=null;this.eddieSearchDir=1;this.facing=owner.facingDirection||1;
+  this.state='intro';this.stateAt=combatNow();this.eddieCarry=null;this.eddieSearchDir=1;this.facing=owner.facingDirection||1;
   this.pathT=0;this.pathStartX=this.x;this.pathStartY=this.y;this.pathDir=this.facing;
   this.patrolLeg=0;this.patrolStartX=this.x;this.dropQueue=0;this.dropCount=0;this.dropPrep=null;this.lastPatrolFrame=0;
   this.crescentCooldownUntil=0;this.patrolCooldownUntil=0;this.hitDone=false;
@@ -434,15 +448,15 @@ class BeatCompanion{
   return this.owner.x+this.owner.width/2-(this.owner.facingDirection||1)*this.owner.width*.85;
  }
  _followY(){return this.owner.feetY-this.owner.height*1.72;}
- _setState(s){if(this.state===s)return;this.state=s;this.stateAt=performance.now();}
+ _setState(s){if(this.state===s)return;this.state=s;this.stateAt=combatNow();}
  _commandFree(){return this.state==='follow';}
  startCrescent(){
-  const now=performance.now();if(!this._commandFree()||now<this.crescentCooldownUntil)return false;
+  const now=combatNow();if(!this._commandFree()||now<this.crescentCooldownUntil)return false;
   this.pathStartX=this.x;this.pathStartY=this.y;this.pathDir=this.owner.facingDirection||1;this.pathT=0;this.hitDone=false;
   this.facing=this.pathDir;this._setState('crescent');return true;
  }
  startPatrol(){
-  const now=performance.now();if(!this._commandFree()||now<this.patrolCooldownUntil)return false;
+  const now=combatNow();if(!this._commandFree()||now<this.patrolCooldownUntil)return false;
   this.patrolLeg=0;this.patrolStartX=this.x;this.pathDir=this.owner.facingDirection||1;this.facing=this.pathDir;
   this.dropQueue=0;this.dropCount=0;this.dropPrep=null;this.lastPatrolFrame=0;this._setState('patrol');return true;
  }
@@ -450,19 +464,19 @@ class BeatCompanion{
   if(this.state!=='patrol'||this.dropCount+this.dropQueue>=4)return false;
   this.dropQueue++;const f=this._ladosFrame();
   // Si faltan más de 3 frames, acercamos la animación al momento de soltar. Si ya está a <=3, espera la vuelta.
-  const forward=(14-f+15)%15;if(forward>3&&forward<12)this.dropPrep={started:performance.now(),reverse:false};
-  else if(forward>=12)this.dropPrep={started:performance.now(),reverse:true};
+  const forward=(14-f+15)%15;if(forward>3&&forward<12)this.dropPrep={started:combatNow(),reverse:false};
+  else if(forward>=12)this.dropPrep={started:combatNow(),reverse:true};
   return true;
  }
  _finishCommand(kind){
-  const now=performance.now();
+  const now=combatNow();
   // Compañeros: 4 s para repetir el MISMO ataque, 2 s para cambiar al otro.
   if(kind==='crescent'){this.crescentCooldownUntil=now+4000;this.patrolCooldownUntil=Math.max(this.patrolCooldownUntil,now+2000);}
   if(kind==='patrol'){this.patrolCooldownUntil=now+4000;this.crescentCooldownUntil=Math.max(this.crescentCooldownUntil,now+2000);}
   this._setState('return');
  }
  _ladosFrame(){
-  const e=performance.now()-this.stateAt;
+  const e=combatNow()-this.stateAt;
   if(this.state==='crescent'||this.state==='intro'){
    // Los 15 sprites describen la vuelta completa. La zona baja conserva más tiempo
    // los frames boca abajo para que la U sea ancha y poco profunda.
@@ -471,19 +485,19 @@ class BeatCompanion{
    let f=14;for(let i=0;i<stops.length;i++){if(t<=stops[i]){f=i;break;}}return f;
   }
   // Patrol: una orden puede acercar visualmente a Beat a los 3 frames previos al drop.
-  if(this.state==='patrol'&&this.dropPrep){const q=Math.min(3,Math.floor((performance.now()-this.dropPrep.started)/55));return this.dropPrep.reverse?[11,12,13,14][q]:[11,12,13,14][q];}
+  if(this.state==='patrol'&&this.dropPrep){const q=Math.min(3,Math.floor((combatNow()-this.dropPrep.started)/55));return this.dropPrep.reverse?[11,12,13,14][q]:[11,12,13,14][q];}
   return Math.floor(e/55)%15;
  }
  _frame(){
   let a,fi;
-  if(this.state==='follow'||this.state==='return'||this.state==='eddie_carry'){a=BEAT_S.idle;fi=Math.floor((performance.now()-this.stateAt)/90)%6;}
+  if(this.state==='follow'||this.state==='return'||this.state==='eddie_carry'){a=BEAT_S.idle;fi=Math.floor((combatNow()-this.stateAt)/90)%6;}
   else {a=BEAT_S.lados;fi=this._ladosFrame();}
   if(!a.img.complete||!a.img.naturalWidth)return null;
   const dw=a.cw*this.scale,dh=a.ch*this.scale;
   return {img:a.img,sx:fi*a.cw,sy:0,sw:a.cw,sh:a.ch,dx:this.x-dw/2,dy:this.y-dh/2,dw,dh,flipX:this.facing!==a.sourceFacing,key:a===BEAT_S.idle?'idle':'lados',frame:fi};
  }
  update(){
-  const now=performance.now();
+  const now=combatNow();
   if(this.state==='intro'){
    // Entrada de fiesta: misma U del Crescent, pero SIN daño.
    if(!this._introInit){this._introInit=true;this.pathStartX=this.owner.x-420;this.pathStartY=this._followY()-170;this.x=this.pathStartX;this.y=this.pathStartY;this.pathDir=1;this.stateAt=now;}
@@ -531,12 +545,12 @@ class BeatCompanion{
    this.x=this.patrolStartX+dir*range*legT; // horizontal: Beat NO sube/baja con Rock.
    // Hasta 4 cajas por Patrol. El input prepara visualmente los frames cercanos al drop.
    const pf=this._ladosFrame();
-   if(this.dropPrep&&performance.now()-this.dropPrep.started>=165&&this.dropQueue>0){
+   if(this.dropPrep&&combatNow()-this.dropPrep.started>=165&&this.dropQueue>0){
     this.owner.spawnBeatBox?.(this.x,this.y);this.dropQueue--;this.dropCount++;this.dropPrep=null;
     // Si ya gastó sus 4 cajas no completa vueltas inútiles: vuelve con Rock inmediatamente.
     if(this.dropCount>=4){this._finishCommand('patrol');return;}
    }
-   else if(!this.dropPrep&&this.dropQueue>0&&this.lastPatrolFrame>pf&&pf<=2){this.dropPrep={started:performance.now(),reverse:false};}
+   else if(!this.dropPrep&&this.dropQueue>0&&this.lastPatrolFrame>pf&&pf<=2){this.dropPrep={started:combatNow(),reverse:false};}
    this.lastPatrolFrame=pf;
    if(legT>=1){
     this.patrolLeg++;this.patrolStartX=this.x;this.stateAt=now;
@@ -564,10 +578,12 @@ class BeatCompanion{
   let hit=target?opaqueFramesOverlap(mine,target,null,2):false;
   if(!target){const r={x:receiver.x,y:receiver.getCurrentY(),w:receiver.width,h:receiver.getCurrentHeight()};hit=opaqueRegionInRect(mine,{x:0,y:0,w:1,h:1},r,2);}
   if(hit){
-   dealDamage(receiver,8,{attacker:this.owner,attackName:'Beat Crescent'});
-   // Beat es anti-aéreo: el impacto lanza al rival, no sólo lo empuja.
-   receiver.vx=this.pathDir*30;receiver.vy=-2;receiver.isGrounded=false;
-   receiver.wasInAirFromKnockback=true;receiver.knockbackAirTimer=0;
+   dealDamage(receiver,8,{attacker:this.owner,attackName:'Beat Crescent',impactX:this.x});
+   if(!receiver.lastGuardImpact?.front){
+    // Beat es anti-aéreo: el impacto lanza al rival, no sólo lo empuja.
+    receiver.vx=this.pathDir*30;receiver.vy=-2;receiver.isGrounded=false;
+    receiver.wasInAirFromKnockback=true;receiver.knockbackAirTimer=0;
+   }
    this.hitDone=true;return true;
   }return false;
  }
@@ -603,8 +619,8 @@ class BeatBox{
   const geo=r.x<receiver.x+receiver.width&&r.x+r.w>receiver.x&&r.y<ry+rh&&r.y+r.h>ry;
   const pixel=geo&&(typeof receiver.pixelBodyIntersectsRect==='function'?receiver.pixelBodyIntersectsRect(r,this.x):true);
   if(!pixel)return false;
-  dealDamage(receiver,this.spec.damage,{attacker:this.owner,attackName:`Beat Box ${z}px`});
-  receiver.vy=-Math.max(4,z/6);receiver.isGrounded=false;receiver.wasInAirFromKnockback=true;receiver.knockbackAirTimer=0;
+  dealDamage(receiver,this.spec.damage,{attacker:this.owner,attackName:`Beat Box ${z}px`,impactX:this.x});
+  if(!receiver.lastGuardImpact?.front){receiver.vy=-Math.max(4,z/6);receiver.isGrounded=false;receiver.wasInAirFromKnockback=true;receiver.knockbackAirTimer=0;}
   this.hit=true;this.dead=true;return true;
  }
  draw(){
@@ -638,19 +654,19 @@ function fireKnock(target,dir,kind='bullet'){
  else if(air)target.vy=Math.min(target.vy||0,-2);
  if(kind!=='ground'){target.isGrounded=false;target.wasInAirFromKnockback=true;target.knockbackAirTimer=0;}
 }
-class FireEffect{
- constructor(owner,type,x,y,dir=1){this.owner=owner;this.type='rock-fire-'+type;this.kind=type;this.x=x;this.y=y;this.dir=dir;this.age=0;this.active=true;this.scale=owner.height/48;this.lastHit=new WeakMap();this.feed=0;this.expires=performance.now()+4500;this.state='spawn';this.stateAt=performance.now();this.vx=dir*8*this.scale;this.vy=-11*this.scale;this.frames=0;}
+export class FireEffect{
+ constructor(owner,type,x,y,dir=1){this.owner=owner;this.type='rock-fire-'+type;this.kind=type;this.x=x;this.y=y;this.dir=dir;this.age=0;this.active=true;this.scale=owner.height/48;this.lastHit=new WeakMap();this.feed=0;this.expires=combatNow()+4500;this.state='spawn';this.stateAt=combatNow();this.vx=dir*8*this.scale;this.vy=-11*this.scale;this.frames=0;}
  getPixelBodyFrame(){let img,sw,sh,frame,flip=this.dir<0;
   if(this.kind==='shot'){img=FIRE_BULLET;sw=16;sh=16;frame=Math.floor(this.age/5)%2;}
   else if(this.kind==='heat'){img=HEAT;sw=32;sh=32;frame=Math.floor(this.age/4)%8;flip=this.vy<0?this.dir>0:this.dir<0;}
-  else if(this.kind==='ground'){img=HEAT_GROUND;sw=32;sh=64;const e=performance.now()-this.stateAt;
+  else if(this.kind==='ground'){img=HEAT_GROUND;sw=32;sh=64;const e=combatNow()-this.stateAt;
    frame=this.state==='spawn'?Math.floor(e/(500/9))%3:this.state==='active'?3+Math.floor(e/105)%4:this.state==='extinguishing'?7+Math.floor(e/100)%2:7+Math.min(3,Math.floor(e/110));flip=false;}
   else{img=FIRE_COLUMN;sw=32;sh=48;frame=Math.floor(this.age/5)%3;}
   if(!img.complete||!img.naturalWidth)return null;
   const w=sw*this.scale,h=sh*this.scale;
   return {img,sx:frame*sw,sy:0,sw,sh,dx:this.x-w/2,dy:this.kind==='ground'||this.kind==='column'?this.y-h:this.y-h/2,dw:w,dh:h,flipX:flip};
  }
- update(){this.age++;const now=performance.now();
+ update(){this.age++;const now=combatNow();
   if(this.kind==='shot'){this.x+=this.vx;if(this.age>85)this.active=false;
    for(const g of this.owner.fireEffects){if(g.kind!=='ground'||!g.active||g.state==='end')continue;
     if(Math.abs(this.x-g.x)<23*this.scale&&Math.abs(this.y-(g.y-24*this.scale))<36*this.scale){g.feed++;g.expires=Math.max(g.expires,now)+900;this.active=false;
@@ -669,11 +685,11 @@ class FireEffect{
   if(this.kind==='ground'&&this.state!=='active')return;
   const a=this.getPixelBodyFrame(),b=target.getPixelBodyFrame?.(this.owner.x+this.owner.width/2);
   if(!a||!b||!opaqueFramesOverlap(a,b,null,2))return;
-  const now=performance.now(),last=this.lastHit.get(target)||0;
+  const now=combatNow(),last=this.lastHit.get(target)||0;
   if(now-last<(this.kind==='ground'?550: this.kind==='column'?400:1000))return;
   this.lastHit.set(target,now);
   const dmg=this.kind==='shot'?3:this.kind==='heat'?7:this.kind==='ground'?2:12;
-  dealDamage(target,dmg,{attacker:this.owner,attackName:'Rock FIRE '+this.kind});fireKnock(target,this.dir,this.kind==='column'?'column':this.kind==='ground'?'ground':'bullet');
+  dealDamage(target,dmg,{attacker:this.owner,attackName:'Rock FIRE '+this.kind,element:'fire',projectile:this.kind==='shot'||this.kind==='heat',impactX:this.x});if(!target.lastGuardImpact?.front)fireKnock(target,this.dir,this.kind==='column'?'column':this.kind==='ground'?'ground':'bullet');
   if(this.kind==='shot'||this.kind==='heat')this.active=false;
  }
  draw(){fireDrawFrame(this.getPixelBodyFrame());}
@@ -695,25 +711,57 @@ function drawEddieSprite(img,frame,x,y,scale,face=-1){
 class EddieSupply{
  constructor(owner,x,y,dir){this.owner=owner;this.x=x;this.y=y;this.dir=dir;this.vx=dir*1.5*owner.height/48;this.vy=-1.8*owner.height/48;this.active=true;this.age=0;this.r=7*owner.height/48;}
  update(){if(!this.active)return;this.age++;const oldY=this.y;this.x+=this.vx;this.y+=this.vy;this.vy=Math.min(8,this.vy+.24*this.owner.height/48);
-  if(this.x-this.r<0||this.x+this.r>worldWidth){this.x=Math.max(this.r+18,Math.min(worldWidth-this.r-18,this.x));this.vx*=-.3;}
+  const [leftWall,rightWall]=HIGHWAY_WALLS;
+  if(this.x-this.r<leftWall.x||this.x+this.r>rightWall.x){
+   this.x=Math.max(leftWall.x+this.r,Math.min(rightWall.x-this.r,this.x));this.vx*=-.3;
+  }
   for(const c of this.owner.concretes){if(!c.isPlatform())continue;const r=c.platformRect;
    if(this.y+this.r>r.y&&this.y-this.r<r.y+r.h&&this.x+this.r>r.x&&this.x-this.r<r.x+r.w){
     if(oldY+this.r<=r.y+3&&this.vy>=0){this.y=r.y-this.r;this.vy=0;this.vx*=.85;}
     else {this.x=this.vx>0?r.x-this.r:r.x+r.w+this.r;this.vx*=-.25;}
    }
   }
-  if(this.y+this.r>=FLOOR_Y){this.y=FLOOR_Y-this.r;this.vy=0;this.vx*=.8;if(Math.abs(this.vx)<.07)this.vx=0;}
-  if(this.age>2400)this.active=false;
+  if(this.y+this.r>=this.owner.feetY){this.y=this.owner.feetY-this.r;this.vy=0;this.vx*=.8;if(Math.abs(this.vx)<.07)this.vx=0;}
+  if(this.age>2400){this.active=false;return;}
+  const rock=this.owner,ammo=rock.weaponAmmo;
+  const reserves=Object.keys(ammo);
+  const mostDepleted=reserves.reduce((lowest,set)=>ammo[set]<ammo[lowest]?set:lowest,reserves[0]);
+  const set=ammo[rock.weaponSet]<100?rock.weaponSet:mostDepleted;
+  const rect={x:this.x-this.r,y:this.y-this.r,w:this.r*2,h:this.r*2};
+  if(ammo[set]<100&&rock.pixelBodyIntersectsRect(rect)){
+   ammo[set]=Math.min(100,ammo[set]+20);
+   this.active=false;
+  }
  }
- draw(){if(!this.active)return;ctx.save();ctx.fillStyle='#e8e5a8';ctx.strokeStyle='#5476ad';ctx.lineWidth=2;ctx.fillRect(this.x-this.r-game.cameraX,this.y-this.r,this.r*2,this.r*2);ctx.strokeRect(this.x-this.r-game.cameraX,this.y-this.r,this.r*2,this.r*2);ctx.restore();}
+ draw(){
+  if(!this.active)return;
+  const x=Math.round(this.x-game.cameraX),y=Math.round(this.y),r=this.r;
+  ctx.save();
+  ctx.fillStyle='#112545';ctx.fillRect(x-r,y-r,r*2,r*2);
+  ctx.strokeStyle='#9ddfff';ctx.lineWidth=2;ctx.strokeRect(x-r,y-r,r*2,r*2);
+  ctx.fillStyle='#38689d';ctx.fillRect(x-r+3,y-r+3,r*2-6,r*.30);
+  ctx.fillStyle='#80ebff';ctx.shadowColor='#51cfff';ctx.shadowBlur=5+3*Math.sin(this.age/7);
+  ctx.fillRect(x-r*.45,y-r*.13,r*.9,r*.26);
+  ctx.fillRect(x-r*.13,y-r*.45,r*.26,r*.9);
+  ctx.restore();
+ }
 }
 class EddieDelivery{
- constructor(owner,x,y,face){this.owner=owner;this.scale=owner.height/48;this.x=x;this.y=y;this.facing=face;this.state='parachute';this.age=0;this.stateAge=0;this.frame=0;this.ground=FLOOR_Y;this.deliveryDir=face;this.exitDir=face;this.spawned=false;this.active=true;this.swing=0;this.wasOpened=false;this.landingCycles=0;this.rocketFrames=0;}
+ constructor(owner,x,y,face){this.owner=owner;this.scale=owner.height/48;this.x=x;this.y=y;this.facing=face;this.state='parachute';this.age=0;this.stateAge=0;this.frame=0;this.ground=this.owner.feetY;this.deliveryDir=face;this.exitDir=face;this.spawned=false;this.active=true;this.swing=0;this.wasOpened=false;this.landingCycles=0;this.rocketFrames=0;}
  setState(state){this.state=state;this.stateAge=0;this.frame=0;}
- surfaceBelow(oldY,nextY){let ground=FLOOR_Y;for(const c of this.owner.concretes){if(!c.isPlatform())continue;const r=c.platformRect;
+ surfaceBelow(oldY,nextY){let ground=this.owner.feetY;for(const c of this.owner.concretes){if(!c.isPlatform())continue;const r=c.platformRect;
   if(this.x+10*this.scale>r.x&&this.x-10*this.scale<r.x+r.w&&oldY<=r.y+3&&nextY>=r.y&&r.y<ground)ground=r.y;
  }return ground;}
+ knockAway(projectile){
+  this.knockVx=Math.sign(projectile.vx || this.x-projectile.owner.x || 1)*8;
+  this.knockVy=-11;this.setState('knocked');
+ }
  update(){if(!this.active)return;this.age++;this.stateAge++;const rock=this.owner;const s=this.scale;
+  if(this.state==='knocked'){
+   this.frame=3;this.x+=this.knockVx;this.y+=this.knockVy;this.knockVy+=.39;
+   if(this.stateAge>64||this.x<-90||this.x>worldWidth+90)this.active=false;
+   return;
+  }
   if(this.state==='parachute'){
    const opened=this.stateAge>=36;const parachuteFrame=opened?2:Math.min(1,Math.floor(this.stateAge/18));
    this.frame=opened?Math.floor(this.stateAge/9)%4:Math.floor(this.stateAge/12)%4;
@@ -765,18 +813,18 @@ class RockBomb{
  update(){this.age++;if(this.blast){if(this.age>14)this.active=false;return;}
   const previous=this._bottom();
   if(!this.resting){this.x+=this.vx;this.y+=this.vy;this.vy+=.55*this.scale;}
-  const next=this._bottom(),b=this._bounds();let surface=FLOOR_Y;
+  const next=this._bottom(),b=this._bounds();let surface=this.owner.feetY;
   for(const c of this.owner.concretes){if(!c.isPlatform())continue;const r=c.platformRect;
    const left=this.x-16*this.scale+b.left*this.scale,right=this.x-16*this.scale+b.right*this.scale;
    if(right<=r.x||left>=r.x+r.w)continue;
    if(previous<=r.y+Math.max(2,Math.abs(this.vy)+2)&&next>=r.y&&r.y<surface)surface=r.y;
   }
   if(!this.resting&&this.vy>=0&&next>=surface){this.y+=surface-next;this.vx=0;this.vy=0;this.resting=true;}
-  if(this.resting){const bottom=this._bottom();const supported=bottom>=FLOOR_Y-.5||this.owner.concretes.some(c=>{if(!c.isPlatform())return false;const r=c.platformRect;return this.x-16*this.scale+b.right*this.scale>r.x&&this.x-16*this.scale+b.left*this.scale<r.x+r.w&&Math.abs(bottom-r.y)<2;});if(!supported){this.resting=false;this.vy=.55*this.scale;}}
+  if(this.resting){const bottom=this._bottom();const supported=bottom>=this.owner.feetY-.5||this.owner.concretes.some(c=>{if(!c.isPlatform())return false;const r=c.platformRect;return this.x-16*this.scale+b.right*this.scale>r.x&&this.x-16*this.scale+b.left*this.scale<r.x+r.w&&Math.abs(bottom-r.y)<2;});if(!supported){this.resting=false;this.vy=.55*this.scale;}}
   if(this.age>280)this.explode();
   for(const f of this.owner.fireEffects)if(f.active&&Math.abs(f.x-this.x)<23*this.scale&&Math.abs(f.y-this.y)<40*this.scale)this.explode();
  }
- tryHit(t){if(!t)return;const d=Math.hypot(t.x+t.width/2-this.x,t.y+t.height/2-this.y);if(this.blast&&d<95*this.scale&&!this.hit.has(t)){this.hit.add(t);const strength=Math.max(0,1-d/(95*this.scale));dealDamage(t,Math.round(5+19*strength),{attacker:this.owner,attackName:'Hyper Bomb'});const side=(t.x+t.width/2>=this.x?1:-1);t.vx=side*(5+21*strength);t.vy=-(5+17*strength);t.isGrounded=false;t.wasInAirFromKnockback=true;t.knockbackAirTimer=0;}}
+ tryHit(t){if(!t)return;const d=Math.hypot(t.x+t.width/2-this.x,t.y+t.height/2-this.y);if(this.blast&&d<95*this.scale&&!this.hit.has(t)){this.hit.add(t);const strength=Math.max(0,1-d/(95*this.scale));dealDamage(t,Math.round(5+19*strength),{attacker:this.owner,attackName:'Hyper Bomb',impactX:this.x});if(!t.lastGuardImpact?.front){const side=(t.x+t.width/2>=this.x?1:-1);t.vx=side*(5+21*strength);t.vy=-(5+17*strength);t.isGrounded=false;t.wasInAirFromKnockback=true;t.knockbackAirTimer=0;}}}
  draw(){const w=32*this.scale,h=32*this.scale;drawGreen(BOMB_IMG,this.blast?2:this._frame(),32,32,this.x-w/2-game.cameraX,this.y-h,w,h,false,this.blast?Math.max(.15,1-this.age/16):.83+.17*Math.sin(this.age*.38));}
 }
 // Search Snake: sprites reales contra hurtbox; trepa los muros de Concrete.
@@ -829,7 +877,7 @@ class RockSnake{
     this.x+=this.dir*1.15*this.scale;
     this.fallVy=Math.min(this.fallVy+.22*this.scale,4*this.scale);
     const oldY=this.y;this.y+=this.fallVy;
-    let surface=FLOOR_Y;
+    let surface=this.owner.feetY;
     for(const c of blocks){const r=c.platformRect;
       if(this.x>=r.x&&this.x<=r.x+r.w&&oldY<=r.y&&this.y>=r.y&&r.y<surface)surface=r.y;
     }
@@ -845,7 +893,7 @@ class RockSnake{
     if(wall){this.climbing=true;this.wall=wall;this.x=wall.edge+(wall.side==='left'?-1:1)*8*this.scale;}
     else{
       this.x=next;
-      let surface=FLOOR_Y;
+      let surface=this.owner.feetY;
       for(const c of blocks){const r=c.platformRect;if(this.x>=r.x&&this.x<=r.x+r.w&&this.y<=r.y+5&&r.y<surface)surface=r.y;}
       this.y=Math.min(surface,this.y+4*this.scale);
     }
@@ -857,7 +905,7 @@ class RockSnake{
 
  }
  tryHit(t){if(!t||this.hit||this.particles.length)return;const mine=this.getPixelBodyFrame(),target=t.getPixelBodyFrame?.(this.x);
-  if(mine&&target&&opaqueFramesOverlap(mine,target,null,1)){dealDamage(t,7,{attacker:this.owner,attackName:'Search Snake',impactX:this.x,impactY:this.y-20});const wallHit=this.climbing;
+  if(mine&&target&&opaqueFramesOverlap(mine,target,null,1)){dealDamage(t,7,{attacker:this.owner,attackName:'Search Snake',projectile:true,impactX:this.x,impactY:this.y-20});if(t.lastGuardImpact?.front){this.hit=true;this.explode();return;}const wallHit=this.climbing;
     if(wallHit && (t.characterId==='x'||t.characterId==='zero'||t.characterId==='knuckles')){
       t.airMobilityLocked=true;
       t.wallSliding=false;
@@ -878,8 +926,20 @@ class RockLeafShield{
  launch(dx=this.owner.facingDirection||1,dy=0){if(this.thrown)return;const positions=this.leaves.map(l=>this.leafFrame(l));this.thrown=true;this.throwAge=0;const len=Math.hypot(dx,dy)||1;this.dir=dx/len;this.dirY=dy/len;this.x=this.owner.x+this.owner.width/2;this.y=this.owner.y+this.owner.height/2;for(let i=0;i<this.leaves.length;i++){this.leaves[i].x=positions[i].px;this.leaves[i].y=positions[i].py;}}
  quadrant(x,y){const cx=this.owner.x+this.owner.width/2,cy=this.owner.y+this.owner.height/2;return (y<cy?0:2)+(x>=cx?1:0);}
  breakLeaf(l,x,y){if(!l?.alive)return;l.alive=false;l.fall=1;l.x=x;l.y=y;}
+ interceptSpin(bounds){
+  if(this.thrown||!this.active)return false;
+  for(const leaf of this.leaves){
+   if(!leaf.alive)continue;
+   const f=this.leafFrame(leaf);
+   if(bounds.x>=f.dx+f.dw||bounds.x+bounds.w<=f.dx||
+      bounds.y>=f.dy+f.dh||bounds.y+bounds.h<=f.dy)continue;
+   this.breakLeaf(leaf,f.px,f.py);
+   return true;
+  }
+  return false;
+ }
  intercept({x,y,attacker}={}){if(this.thrown||!this.active)return false;const q=this.quadrant(x??(attacker?.x??this.owner.x),y??(attacker?.y??this.owner.y));const leaf=this.leaves[q];if(!leaf?.alive)return false;this.breakLeaf(leaf,this.owner.x+this.owner.width*(q%2?.78:.22),this.owner.y+this.owner.height*(q<2?.25:.75));return true;}
- leafFrame(l){const w=64,scale=this.owner.height/48,angle=performance.now()/360+l.slot*Math.PI/2,radius=23*scale;const cx=this.owner.x+this.owner.width/2,cy=this.owner.y+this.owner.height/2;const px=this.thrown?l.x:cx+Math.cos(angle)*radius,py=this.thrown?l.y:cy+Math.sin(angle)*radius;return {img:LEAF_IMG,sx:((Math.floor(performance.now()/65)+l.slot*3)%12)*32,sy:0,sw:32,sh:32,dx:px-w/2,dy:py-w/2,dw:w,dh:w,flipX:false,px,py};}
+ leafFrame(l){const w=64,scale=this.owner.height/48,angle=combatNow()/360+l.slot*Math.PI/2,radius=23*scale;const cx=this.owner.x+this.owner.width/2,cy=this.owner.y+this.owner.height/2;const px=this.thrown?l.x:cx+Math.cos(angle)*radius,py=this.thrown?l.y:cy+Math.sin(angle)*radius;return {img:LEAF_IMG,sx:((Math.floor(combatNow()/65)+l.slot*3)%12)*32,sy:0,sw:32,sh:32,dx:px-w/2,dy:py-w/2,dw:w,dh:w,flipX:false,px,py};}
  update(){
   const speed=3*this.owner.height/48;
   if(this.thrown)this.throwAge++;
@@ -889,7 +949,7 @@ class RockLeafShield{
     const f=this.leafFrame(l),dx=this.dir,dy=this.dirY||0;
     // Colisiones del escenario según el sentido de vuelo, no por rozar el suelo.
     let collide=(dx<0&&f.dx<=0)||(dx>0&&f.dx+f.dw>=worldWidth)
-      ||(dy<0&&f.dy<=0)||(dy>0&&f.dy+f.dh>=FLOOR_Y);
+      ||(dy<0&&f.dy<=0)||(dy>0&&f.dy+f.dh>=this.owner.feetY);
     if(!collide)for(const c of this.owner.concretes){
      if(!c.isPlatform())continue;
      const r=c.platformRect;
@@ -908,7 +968,7 @@ class RockLeafShield{
  }
  tryHit(t){if(!this.thrown||!t)return;const target=t.getPixelBodyFrame?.(this.x);if(!target)return;
   for(const l of this.leaves){if(!l.alive)continue;const f=this.leafFrame(l);if(opaqueFramesOverlap(f,target,null,1)){
-   dealDamage(t,4,{attacker:this.owner,attackName:'Leaf Shield',impactX:f.px,impactY:f.py});t.vx=this.dir*6;this.breakLeaf(l,f.px,f.py);
+   dealDamage(t,4,{attacker:this.owner,attackName:'Leaf Shield',projectile:true,impactX:f.px,impactY:f.py});if(!t.lastGuardImpact?.front)t.vx=this.dir*6;this.breakLeaf(l,f.px,f.py);
   }}
  }
  draw(){for(const l of this.leaves){if(l.fall){const f=12+Math.min(4,Math.floor(l.fall/9));drawGreen(LEAF_IMG,f,32,32,l.x-32-game.cameraX,l.y-32,64,64,false,Math.max(.2,1-l.fall/85));continue;}if(!l.alive)continue;const f=this.leafFrame(l);drawGreen(LEAF_IMG,f.sx/32,32,32,f.dx-game.cameraX,f.dy,f.dw,f.dh);}}
@@ -919,12 +979,12 @@ export class Rock extends PrototypeFighter {
   super(x,y,controls,{name:'ROCK',color:'#3588e8',hasSonicJump:false,speed:6});
   initBuster(this,'rock'); configureCombatant(this,'rock','ROCK'); this.characterId='rock';
   this.isIntroActive=true; this.introFrame=0; this.introTimer=0;
-  this.rockBornAt=performance.now(); this.runStartedAt=performance.now(); this.wasRunning=false;
+  this.rockBornAt=combatNow(); this.runStartedAt=combatNow(); this.wasRunning=false;
   this.jumpStartedAt=0; this.wasGroundedRock=true;
   this.fireStartedAt=0; this.fireUntil=0; this.chargeShotStartedAt=0; this.chargeShotUntil=0;
   this.slashActive=false; this.slashStartedAt=0; this.slashHit=false;
   // Rock inicia BASE. Doble abajo abre selector; tercer input elige set.
-  this.weaponSet='base';this.weaponMenuOpen=false;this.lastCrouchTap=0;this.weaponFlashUntil=0;this.weaponFlashTarget=0;
+  this.weaponSet='base';this.weaponAmmo={cut_concrete:100,fire:100,leaf_snake:100};this.weaponAmmoLastAt=combatNow();this.weaponMenuOpen=false;this.lastCrouchTap=0;this.weaponFlashUntil=0;this.weaponFlashTarget=0;
   this.cutShotActive=false;this.cutShotStartedAt=0;this.cutShotSpawned=false;
   this.concretes=[];this.concreteMovingCooldownUntil=0;this.cutterCooldownUntil=0;this.fireEffects=[];this.heatCasting=false;this.swordCasting=false;this.fireShotCooldown=0;
   this.hitUntil=0;this.leafShield=null;this.snakes=[];this.bombs=[];this.greenCast=null;this.bombCooldownUntil=0;
@@ -934,54 +994,95 @@ export class Rock extends PrototypeFighter {
   this.beatBoxes=[];this.eddies=[];this.eddieSupplies=[];this.eddieCooldownUntil=0;
  }
  getIntroFrames(){return [5,6,5,6,5,6].map(duration=>({duration}));} // Bass: 22 frames/2 s ~= 91 ms por sprite; Rock: 6 frames ~= 0.55 s.
- isAttacking(){return this.heatCasting||this.swordCasting||this.cutShotActive||this.slashActive||performance.now()<this.chargeShotUntil||super.isAttacking();}
- isBusy(){return this.heatCasting||this.swordCasting||this.cutShotActive||this.slashActive||performance.now()<this.chargeShotUntil||super.isBusy();}
- onDamageTaken(){this.hitUntil=performance.now()+260;this.weaponMenuOpen=false;}
- startRushCoil(){if(this.isIntroActive||this.weaponMenuOpen)return false;return this.activeRush?.startCoil()||false;}
- startRushJet(direction){if(this.isIntroActive||this.weaponMenuOpen)return false;return this.independentJet?.start(direction)||false;}
+ isAttacking(){return this.heatCasting||this.swordCasting||this.cutShotActive||this.slashActive||combatNow()<this.chargeShotUntil||super.isAttacking();}
+ isBusy(){return this.heatCasting||this.swordCasting||this.cutShotActive||this.slashActive||combatNow()<this.chargeShotUntil||super.isBusy();}
+ onDamageTaken({stagger=true}={}){if(!stagger)return;this.hitUntil=combatNow()+260;this.weaponMenuOpen=false;}
+ startRushCoil(){if(this.isIntroActive||this.weaponMenuOpen)return false;return captureTournamentTool(this,'Rush Coil',this.activeRush?.startCoil()||false);}
+ startRushJet(direction){if(this.isIntroActive||this.weaponMenuOpen)return false;return captureTournamentTool(this,'Rush Jet',this.independentJet?.start(direction)||false);}
  startBeatCrescent(){if(this.isIntroActive||this.isBusy())return false;return this.activeBeat?.startCrescent()||false;}
- startBeatPatrol(){if(this.isIntroActive||this.isBusy())return false;return this.activeBeat?.startPatrol()||false;}
+ startBeatPatrol(){if(this.isIntroActive||this.isBusy())return false;return captureTournamentTool(this,'Beat Patrol',this.activeBeat?.startPatrol()||false);}
  requestBeatDrop(){return this.activeBeat?.requestDrop()||false;}
+ handleProjectileVsEddie(projectile){
+  if(!projectile.active || projectile.owner===this)return false;
+  const rect={x:projectile.x,y:projectile.y,w:projectile.width,h:projectile.height};
+  if (!this.hitEddie(rect,projectile)) return false;
+  projectile.active=false;
+  return true;
+ }
+ handleMeleeVsEddie(rect,attacker){
+  return attacker!==this && this.hitEddie(rect,{owner:attacker,vx:0},true);
+ }
+ hitEddie(rect,impact,preferRock=false){
+  const beat=this.activeBeat;
+  const carrying=beat && ['eddie_return','eddie_carry'].includes(beat.state);
+  const carried=carrying ? {x:beat.x,y:beat.y+39*beat.scale,scale:beat.scale,facing:beat.facing,
+   frame:Math.floor(combatNow()/100)%4} : null;
+  const candidates=this.eddies.filter(eddie=>eddie.active && eddie.state!=='knocked');
+  if(carried)candidates.push(carried);
+  const hit=candidates.find(eddie=>{
+   const s=eddie.scale;
+   const x=eddie.x+(eddie.facing===1?-21:-14)*s;
+   const y=eddie.y-35*s;
+   return rect.x<x+35*s && rect.x+rect.w>x && rect.y<y+35*s && rect.y+rect.h>y;
+  });
+  if(!hit || (preferRock && this.pixelBodyIntersectsRect(rect)))return false;
+  if(hit===carried){
+   const dropped=new EddieDelivery(this,hit.x,hit.y,hit.facing);
+   this.eddies.push(dropped);dropped.knockAway(impact);beat._setState('return');
+  }else hit.knockAway(impact);
+  this.eddieCooldownUntil=combatNow()+10000;
+  return true;
+ }
  releaseEddie(){const beat=this.activeBeat;if(beat?.state!=='eddie_carry')return false;this.eddies.push(new EddieDelivery(this,beat.x,beat.y+39*beat.scale,this.facingDirection||1));beat._setState('return');return true;}
- requestEddie(){const now=performance.now();if(this.isIntroActive||now<this.eddieCooldownUntil||this.eddies.some(e=>e.active)||!this.activeBeat||this.activeBeat.state!=='follow')return false;
-  this.eddieCooldownUntil=now+12000;const beat=this.activeBeat;beat.eddieSearchDir=this.facingDirection||1;beat.pathStartX=beat.x;beat.pathStartY=beat.y;beat._setState('eddie_search');return true;}
+ requestEddie(){const now=combatNow();if(this.isIntroActive||now<this.eddieCooldownUntil||this.eddies.some(e=>e.active)||!this.activeBeat||this.activeBeat.state!=='follow')return false;
+  this.eddieCooldownUntil=now+10000;const beat=this.activeBeat;beat.eddieSearchDir=this.facingDirection||1;beat.pathStartX=beat.x;beat.pathStartY=beat.y;beat._setState('eddie_search');return captureTournamentTool(this,'Eddie');}
 
  spawnBeatBox(x,y){this.beatBoxes.push(new BeatBox(this,x,y));}
+ spendWeaponAmmo(cost,set=this.weaponSet){if(game.mode==='practice'||set==='base')return true;const left=this.weaponAmmo[set]??0;if(left<cost)return false;this.weaponAmmo[set]=left-cost;return true;}
  handleWeaponSelectorInput(code){
-  const now=performance.now(),c=this.controls;
+  const now=combatNow(),c=this.controls;
   if(code===c.crouch){
    if(this.weaponMenuOpen){this.selectWeaponSet('base');return true;}
    if(now-this.lastCrouchTap<=300){this.weaponMenuOpen=true;this.vx=0;this.lastCrouchTap=0;return true;}
    this.lastCrouchTap=now;return false;
   }
   if(!this.weaponMenuOpen)return false;
+  if(code===c.attack){this.selectWeaponSet('base');return false;}
   if(code===c.jump){this.selectWeaponSet('cut_concrete');return true;}
   if(code===c.right){this.selectWeaponSet('fire');return true;}
   if(code===c.left){this.selectWeaponSet('leaf_snake');return true;}
   return true;
  }
  selectWeaponSet(set){
-  // En esta entrega sólo BASE y CUT/CONCRETE son funcionales; los otros quedan reservados.
-  // Set verde habilitado; los objetos colocados no se borran al cambiar de set.
-  this.cleanupWeaponSet();this.weaponSet=set;this.weaponMenuOpen=false;this.weaponFlashUntil=performance.now()+2000;this.weaponFlashTarget=set==='cut_concrete'?4:set==='fire'?5:set==='leaf_snake'?6:0;return true;
+  this.weaponMenuOpen=false;
+  if(set===this.weaponSet)return true;
+  // Cambiar de set limpia entidades temporales, pero conserva las tres reservas de munición.
+  this.busterCharging=false;this.busterChargeStart=0;
+  this.cleanupWeaponSet();this.weaponSet=set;this.weaponFlashUntil=combatNow()+2000;this.weaponFlashTarget=set==='cut_concrete'?4:set==='fire'?5:set==='leaf_snake'?6:0;return true;
  }
  cleanupWeaponSet(){for(const p of game.projectiles)if(p.owner===this&&p.type==='rolling-cutter')p.active=false;for(const c of this.concretes)c.active=false;this.concretes=[];}
  startGreen(kind){if(this.weaponSet!=='leaf_snake'||this.isBusy()||this.isIntroActive||this.greenCast)return false;
-  if(kind==='leaf'){if(!this.leafShield)this.leafShield=new RockLeafShield(this);else this.leafShield.launch();return true;}
   if(kind==='snake'&&this.snakes.filter(o=>o.active).length>=2)return false;
-  if(kind==='bomb'&&(this.bombs.filter(o=>o.active).length>=3||performance.now()<this.bombCooldownUntil))return false;
-  if(kind==='bomb')this.bombCooldownUntil=performance.now()+900;
-  this.greenCast={kind,at:performance.now(),spawned:false};this.facingLocked=true;return true;}
- launchLeaf(dx,dy){if(!this.leafShield||this.leafShield.thrown)return false;this.leafShield.launch(dx,dy);return true;}
+  if(kind==='bomb'&&(this.bombs.filter(o=>o.active).length>=3||combatNow()<this.bombCooldownUntil))return false;
+  const cost={snake:8,bomb:13,leaf:12}[kind]||0;if(!this.spendWeaponAmmo(cost))return false;
+  if(kind==='leaf'){if(!this.leafShield)this.leafShield=new RockLeafShield(this);else this.leafShield.launch();return true;}
+  if(kind==='bomb')this.bombCooldownUntil=combatNow()+900;
+  this.greenCast={kind,at:combatNow(),spawned:false};this.facingLocked=true;return true;}
+ launchLeaf(dx,dy){if(!this.leafShield||this.leafShield.thrown)return false;const cost=Math.max(2,this.leafShield.leaves.filter(l=>l.alive).length*2);if(!this.spendWeaponAmmo(cost))return false;this.leafShield.launch(dx,dy);return true;}
  startConcrete(kind='moving'){
   if(this.weaponSet!=='cut_concrete'||this.isBusy()||this.isIntroActive||this.weaponMenuOpen)return false;
   const builds=this.concretes.filter(c=>c.active&&(c.kind==='build_near'||c.kind==='build_far')).length;
   if((kind==='build_near'||kind==='build_far')&&builds>=2)return false;
-  if(kind==='moving'&&(performance.now()<this.concreteMovingCooldownUntil||this.concretes.some(c=>c.active&&c.kind==='moving')))return false;
-  this.fireStartedAt=performance.now();this.fireUntil=this.fireStartedAt+260;this.concretes.push(new ConcreteBlock(this,kind));return true;
+  if(kind==='moving'&&(combatNow()<this.concreteMovingCooldownUntil||this.concretes.some(c=>c.active&&c.kind==='moving')))return false;
+  if(!this.spendWeaponAmmo(kind==='moving'?14:8))return false;
+  this.fireStartedAt=combatNow();this.fireUntil=this.fireStartedAt+260;this.concretes.push(new ConcreteBlock(this,kind));return true;
  }
  resolveConcreteBody(f){
   if(!f||!Number.isFinite(f.x)||!Number.isFinite(f.y))return;
+  if(f.minerPhase==='under'||f.minerPhase==='warning'){
+   f._concretePreviousX=f.x;f._concretePreviousY=f.y;
+   return;
+  }
   // Bounding box derivado del primer idle: la muestra alfa se calcula una vez por imagen.
   const idle=f.characterId==='rock'?S.idle.img:(f.getPixelBodyFrame?.()?.img);
   let insetX=.18,insetY=.08,widthRatio=.64,heightRatio=.88;
@@ -996,8 +1097,16 @@ export class Rock extends PrototypeFighter {
    const oldRight=prevX+fw*(insetX+widthRatio),oldLeft=prevX+fw*insetX;
    if((f.vy??0)>=0&&oldBottom<=r.y+12){f.y=r.y-fh*(insetY+heightRatio);f.vy=0;f.isGrounded=true;f.x+=c.lastMoveX||0;}
    else if((f.vy??0)<0&&oldTop>=r.y+r.h-12){f.y=r.y+r.h-fh*insetY;f.vy=0;}
-   else if(oldRight<=r.x+15||f.x+fw/2<r.x+r.w/2){f.x=r.x-fw*(insetX+widthRatio)-.1;f.vx=0;f.isDashing=false;}
-   else {f.x=r.x+r.w-fw*insetX+.1;f.vx=0;f.isDashing=false;}
+   else {
+    const [leftWall,rightWall]=HIGHWAY_WALLS;
+    const leftExit=r.x-fw*(insetX+widthRatio)-.1;
+    const rightExit=r.x+r.w-fw*insetX+.1;
+    const preferLeft=oldRight<=r.x+15||f.x+fw/2<r.x+r.w/2;
+    if(leftExit<leftWall.x)f.x=rightExit;
+    else if(rightExit+fw>rightWall.x)f.x=leftExit;
+    else f.x=preferLeft?leftExit:rightExit;
+    f.vx=0;f.isDashing=false;
+   }
   }
   f._concretePreviousX=f.x;f._concretePreviousY=f.y;
  }
@@ -1006,24 +1115,34 @@ export class Rock extends PrototypeFighter {
   for(const c of this.concretes){if(!c.isPlatform())continue;const r=c.platformRect;if(proj.x<r.x+r.w&&proj.x+proj.width>r.x&&proj.y<r.y+r.h&&proj.y+proj.height>r.y){const breaks=proj.type==='buster-x-4';c.takeDamage(proj.damage||3,{breaksConcrete:breaks});proj.active=false;return true;}}
   return false;
  }
- startFireShot(){if(this.weaponSet!=='fire'||this.isIntroActive||this.weaponMenuOpen||performance.now()<this.fireShotCooldown)return false;const dir=this.facingDirection||1;this.fireShotCooldown=performance.now()+160;this.fireStartedAt=performance.now();this.fireUntil=this.fireStartedAt+250;this.fireEffects.push(new FireEffect(this,'shot',this.x+this.width/2+dir*28,this.y+this.height*.45,dir));return true;}
- startHeatFire(){if(this.weaponSet!=='fire'||this.isBusy()||this.isIntroActive)return false;this.heatCasting=true;this.heatCastAt=performance.now();this.heatSpawned=false;this.facingLocked=true;return true;}
- startFlameSword(){if(this.weaponSet!=='fire'||this.isBusy()||this.isIntroActive)return false;this.swordCasting=true;this.swordCastAt=performance.now();this.swordHit=false;this.facingLocked=true;this.vy=-14;this.isGrounded=false;return true;}
- startSlashClaw(){if(!this.isGrounded||this.isBusy()||this.isIntroActive)return false;this.slashActive=true;this.slashStartedAt=performance.now();this.slashHit=false;this.facingLocked=true;return true;}
+ startFireShot(){if(this.weaponSet!=='fire'||this.isIntroActive||this.weaponMenuOpen||combatNow()<this.fireShotCooldown||!this.spendWeaponAmmo(2))return false;const dir=this.facingDirection||1;this.fireShotCooldown=combatNow()+160;this.fireStartedAt=combatNow();this.fireUntil=this.fireStartedAt+250;this.fireEffects.push(new FireEffect(this,'shot',this.x+this.width/2+dir*28,this.y+this.height*.45,dir));return true;}
+ startHeatFire(){if(this.weaponSet!=='fire'||this.isBusy()||this.isIntroActive||!this.spendWeaponAmmo(14))return false;this.heatCasting=true;this.heatCastAt=combatNow();this.heatSpawned=false;this.facingLocked=true;return true;}
+ startFlameSword(){if(this.weaponSet!=='fire'||this.isBusy()||this.isIntroActive||!this.spendWeaponAmmo(12))return false;this.swordCasting=true;this.swordCastAt=combatNow();this.swordHit=false;this.facingLocked=true;this.vy=-14;this.isGrounded=false;return true;}
+ startSlashClaw(){if(!this.isGrounded||this.isBusy()||this.isIntroActive)return false;this.slashActive=true;this.slashStartedAt=combatNow();this.slashHit=false;this.facingLocked=true;return true;}
  startRollingCutter(arc='lower'){
-  if(this.weaponSet!=='cut_concrete'||this.isBusy()||this.isIntroActive||this.weaponMenuOpen||performance.now()<this.cutterCooldownUntil)return false;
+  if(this.weaponSet!=='cut_concrete'||this.isBusy()||this.isIntroActive||this.weaponMenuOpen||combatNow()<this.cutterCooldownUntil)return false;
   // Sólo puede existir UN Rolling Cutter de Rock a la vez.
-  if(game.projectiles.some(p=>p.active&&p.owner===this&&p.type==='rolling-cutter'))return false;
-  this.cutShotActive=true;this.cutShotArc=arc;this.cutShotStartedAt=performance.now();this.cutShotSpawned=false;this.vx=0;this.isDashing=false;this.facingLocked=true;return true;
+  if(game.projectiles.some(p=>p.active&&p.owner===this&&p.type==='rolling-cutter')||!this.spendWeaponAmmo(10))return false;
+  this.cutShotActive=true;this.cutShotArc=arc;this.cutShotStartedAt=combatNow();this.cutShotSpawned=false;this.vx=0;this.isDashing=false;this.facingLocked=true;return true;
  }
  onBusterFired(level){
-  const now=performance.now();this.fireStartedAt=now;this.fireUntil=now+260;
+  const now=combatNow();this.fireStartedAt=now;this.fireUntil=now+260;
+  if(level===1)this.lastBasicShotAt=now;
   if(level>1&&this.isGrounded){this.chargeShotStartedAt=now;this.chargeShotUntil=now+450;this.vx=0;this.isDashing=false;this.facingLocked=true;}
  }
  update(opponentX,self){
   const wasGround=this.isGrounded;
   super.update(opponentX,self);
-  const now=performance.now();
+  const now=combatNow();
+  if (this.weaponSet==='base' && !this.weaponMenuOpen && !this.isIntroActive &&
+      !this.isHitstunned() && !this.isVulnerable && !this.busterCharging && this.keys[this.controls.attack] &&
+      ['0','go'].includes(game.countdown?.phase)) {
+   this.busterCharging=true;
+   this.busterChargeStart=now;
+   this.busterChargeLevel=1;
+  }
+  const ammoDelta=Math.max(0,now-this.weaponAmmoLastAt);this.weaponAmmoLastAt=now;
+  for(const set of ['cut_concrete','fire','leaf_snake'])if(set!==this.weaponSet)this.weaponAmmo[set]=Math.min(100,this.weaponAmmo[set]+ammoDelta*.0008);
   if(!this.facingLocked)this.facingDirection=opponentX>this.x?1:-1;
   if(wasGround&&!this.isGrounded)this.jumpStartedAt=now;
   const running=this.isGrounded&&Math.abs(this.vx)>.1&&!this.slashActive&&now>=this.chargeShotUntil;
@@ -1060,18 +1179,18 @@ export class Rock extends PrototypeFighter {
   this.beatBoxes=this.beatBoxes.filter(box=>!box.dead);
  }
  _paletteIndex(){
-  const now=performance.now();
+  const now=combatNow();
   if(now<this.weaponFlashUntil){const elapsed=2000-(this.weaponFlashUntil-now);return Math.floor(elapsed/200)%2===0?2:this.weaponFlashTarget;}
   if(this.weaponSet==='cut_concrete')return 4;
   if(this.weaponSet==='fire')return 5;
   if(this.weaponSet==='leaf_snake')return 6;
   if(!this.busterCharging)return 0;
   const level=getBusterLevel(this);const base=level===1?0:level===2?1:3;
-  return Math.floor(performance.now()/95)%2===0?base:2; // Nv1 P1<->P3, Nv2 P2<->P3, Nv3 P4<->P3
+  return Math.floor(combatNow()/95)%2===0?base:2; // Nv1 P1<->P3, Nv2 P2<->P3, Nv3 P4<->P3
  }
- _runFrame(){const cycle=this.walkReverse?2160:720;return Math.floor(((performance.now()-this.runStartedAt)%cycle)/(cycle/10));}
+ _runFrame(){const cycle=this.walkReverse?2160:720;return Math.floor(((combatNow()-this.runStartedAt)%cycle)/(cycle/10));}
  _anim(){
-  const now=performance.now();
+  const now=combatNow();
   if(this.isIntroActive)return ['intro',Math.min(5,this.introFrame)];
   if(now<this.hitUntil||this.wasInAirFromKnockback)return [this.isGrounded?'hit':'airhit',0];
   if(this.swordCasting)return ['flamesword',Math.min(3,Math.floor((now-this.swordCastAt)/90))];
@@ -1110,9 +1229,9 @@ export class Rock extends PrototypeFighter {
   for(const c of this.concretes)c.tryHit(receiver);
   for(const fx of this.fireEffects)fx.tryHit(receiver);
   for(const b of this.bombs)b.tryHit(receiver);for(const sn of this.snakes)sn.tryHit(receiver);this.leafShield?.tryHit(receiver);
-  if(this.swordCasting&&!this.swordHit){const e=performance.now()-this.swordCastAt;if(e>=70&&e<360){const body=this._frame();const target=receiver?.getPixelBodyFrame?.(this.x+this.width/2);if(body&&target){const sword={...body,img:SWORD_FX};if(opaqueFramesOverlap(sword,target,null,1)){dealDamage(receiver,12,{attacker:this,attackName:'Flame Sword',impactX:this.x+this.width/2,impactY:this.y+this.height*.45});fireKnock(receiver,this.facingDirection,'column');this.swordHit=true;}}}}
+  if(this.swordCasting&&!this.swordHit){const e=combatNow()-this.swordCastAt;if(e>=70&&e<360){const body=this._frame();const target=receiver?.getPixelBodyFrame?.(this.x+this.width/2);if(body&&target){const sword={...body,img:SWORD_FX};if(opaqueFramesOverlap(sword,target,null,1)){dealDamage(receiver,12,{attacker:this,attackName:'Flame Sword',element:'fire',impactX:this.x+this.width/2,impactY:this.y+this.height*.45});if(!receiver.lastGuardImpact?.front)fireKnock(receiver,this.facingDirection,'column');this.swordHit=true;}}}}
   if(!receiver||!this.slashActive||this.slashHit)return;
-  const elapsed=performance.now()-this.slashStartedAt;if(elapsed<170||elapsed>=255)return; // frame 3 (indice 2)
+  const elapsed=combatNow()-this.slashStartedAt;if(elapsed<170||elapsed>=255)return; // frame 3 (indice 2)
   const f=this._frame();if(!f)return;
   // Region dada sobre el frame fuente: x=7..18, 7 px de alto empezando 19 px desde abajo.
   const lx=7,ly=48-19-7,lw=12,lh=7,s=f.scale;
@@ -1125,7 +1244,7 @@ export class Rock extends PrototypeFighter {
  }
  draw(opponentX){
   if(!this.independentJet?.active)this.activeRush?.draw();this.independentJet?.draw();
-  if(['eddie_return','eddie_carry'].includes(this.activeBeat?.state))drawEddieSprite(EDDIE_IMG,Math.floor(performance.now()/100)%4,this.activeBeat.x,this.activeBeat.y+39*this.activeBeat.scale,this.activeBeat.scale,this.activeBeat.facing);
+  if(['eddie_return','eddie_carry'].includes(this.activeBeat?.state))drawEddieSprite(EDDIE_IMG,Math.floor(combatNow()/100)%4,this.activeBeat.x,this.activeBeat.y+39*this.activeBeat.scale,this.activeBeat.scale,this.activeBeat.facing);
   this.activeBeat?.draw();
   for(const e of this.eddies)e.draw();for(const item of this.eddieSupplies)item.draw();
   for(const box of this.beatBoxes)box.draw();

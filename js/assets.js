@@ -96,9 +96,9 @@ export const sonicJumpAudio = new Audio("assets/audio/SonicJump.mp3");
 sonicJumpAudio.preload = "auto";
 export const sonicSpinDashAudio = new Audio("assets/audio/SonicSpinDash.mp3");
 sonicSpinDashAudio.preload = "auto";
-export const hitAudio = new Audio("assets/audio/hit.mp3");
+export const hitAudio = new Audio("assets/audio/hit.wav");
 hitAudio.preload = "auto";
-export const busterAudio = new Audio("assets/audio/buster.mp3");
+export const busterAudio = new Audio("assets/audio/buster.wav");
 busterAudio.preload = "auto";
 
 // Bass
@@ -114,5 +114,3 @@ bassPisoAudio.preload = "auto";
 // ZERO - HOJA MAESTRA (frames variables)
 // ========================================
 // Se usa directamente con source rectangles; NO se divide en PNGs nuevos.
-export const zeroMasterSheet = new Image();
-zeroMasterSheet.src = "assets/images/Zerosprites.png";

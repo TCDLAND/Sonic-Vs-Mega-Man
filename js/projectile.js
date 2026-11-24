@@ -38,7 +38,7 @@ export class Projectile {
             if (this.animTimer >= 1) {
                 this.animTimer = 0;
                 this.currentImgIndex++;
-                if (this.currentImgIndex >= this.images.length) this.currentImgIndex = 3;
+                if (this.currentImgIndex >= this.images.length) this.currentImgIndex = this.images.length > 3 ? 3 : 0;
             }
             if (this.currentImgIndex >= 3) this.rotation += this.rotationSpeed;
             else this.rotation = 0;
@@ -50,8 +50,9 @@ export class Projectile {
     }
 
     draw(cameraX) {
-        const currentImg = this.images[this.currentImgIndex] || this.images[0];
-        if (!currentImg || !currentImg.complete) return;
+        const frame = this.images[this.currentImgIndex] || this.images[0];
+        const currentImg = frame?.img ?? frame;
+        if (!currentImg?.complete || !currentImg.naturalWidth) return;
 
         let projDrawX = this.x - cameraX;
 
@@ -63,7 +64,11 @@ export class Projectile {
             ctx.scale(-1, 1);
         }
 
-        ctx.drawImage(
+        if (frame.img) {
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(currentImg,frame.sx,frame.sy,frame.sw,frame.sh,
+                -this.width/2,-this.height/2,this.width,this.height);
+        } else ctx.drawImage(
             currentImg,
             -this.width / 2,
             -this.height / 2,

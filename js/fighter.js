@@ -1,7 +1,9 @@
+import { combatNow } from './combat-clock.js';
 // ========================================
 // CLASE BASE FIGHTER
 // ========================================
 
+import { HIGHWAY_WALLS } from './wall-system.js';
 import { worldWidth } from './config.js';
 import { game } from './state.js';
 import { playSound, getCellCoords } from './utils.js';
@@ -17,6 +19,7 @@ export class Fighter {
         this.feetY = y;
         this.width = 126;
         this.height = 153;
+        this.characterScale = 1;
         this.y = this.feetY - this.height;
         this.color = color;
         this.hasSonicJump = hasSonicJump;
@@ -91,11 +94,14 @@ export class Fighter {
         this.tonguePoseDuration = 5;
         this.tongueExtendDuration = 40;
         this.tongueRetractDuration = 15;
-        this.lastTongueRects = [];
         this.tongueDirection = 1;
 
         this.isGuarding = false;
         this.guardType = null;
+        this.guardDamage = this.guardDamage || 0;
+        this.guardLastHitAt = this.guardLastHitAt || 0;
+        this.guardBrokenUntil = this.guardBrokenUntil || 0;
+        this.guardBreakFlashUntil = this.guardBreakFlashUntil || 0;
         this.isVulnerable = false;
         this.vulnerableTimer = 0;
         this.vulnerableDuration = 30;
@@ -111,11 +117,12 @@ export class Fighter {
         this.shurikenTimer = 0;
         this.shurikenDuration = 30;
 
-        this.bulletsReceivedInBurst = 0;
-        this.lastBulletHitTime = 0;
+        this.bassBulletHitTimes = [];
 
         this.maxHealth = MAX_HEALTH;
         this.health = MAX_HEALTH;
+        this.maxPower = 100;
+        this.power = 0;
         this.defenseMultiplier = 1;
         this.characterId = 'fighter';
         this.wallSliding = false;
@@ -164,6 +171,8 @@ export class Fighter {
         this.facingLocked = false;
         this.facingUnlockAt = 0;
         this.guardFlashUntil = 0;
+        this.guardContactKey = null;
+        this.guardContactAt = 0;
     }
 
     isMovingToward(opponentX) {
@@ -179,9 +188,10 @@ export class Fighter {
     }
 
     checkDoubleTap(direction, opponentX) {
+        if (this.isSpinning || this.isSpinDashActive) return;
         let isToward = (direction === "right") ? (this.x < opponentX) : (this.x > opponentX);
         if (!isToward) return;
-        const now = performance.now();
+        const now = combatNow();
         if (now - this.lastDirectionPress[direction] <= this.doubleTapDelay) {
             this.isDashing = true;
             this.dashFrame = 0;
@@ -264,6 +274,7 @@ export class Fighter {
 
     isBusy() {
         return (
+            this.isHitstunned() ||
             this.isJabActive ||
             this.isHeavyActive ||
             this.isKickLightActive ||
@@ -277,6 +288,10 @@ export class Fighter {
         );
     }
 
+    isHitstunned() {
+        return combatNow() < (this.hitstunUntil || 0);
+    }
+
     isAttacking() {
         return (
             this.isJabActive ||
@@ -287,19 +302,26 @@ export class Fighter {
         );
     }
 
-    applyDamage(receiver, damage, guardBreaks, knockback = null) {
+    applyDamage(receiver, damage, guardBreaks, knockback = null, moveName = 'Ataque físico') {
+        let damageAlreadyApplied = false;
+        let blockedThisHit = false;
         if (receiver.isGuarding && receiver.guardType) {
             const blocked = !guardBreaks.includes(receiver.guardType);
             if (blocked) {
-                dealDamage(receiver, damage, { attacker: this, attackName: 'Ataque bloqueado', multiplier: 0.15 });
-                receiver.guardFlashUntil = performance.now() + 180;
-                return false;
+                dealDamage(receiver, damage, { attacker: this, attackName: moveName, damageCategory: 'cuerpo a cuerpo', guardMultiplier: 0.15,
+                    impactX: this.x + this.width / 2 });
+                if (receiver.lastGuardImpact?.blocked) { blockedThisHit = true; return false; }
+                damageAlreadyApplied = true;
             }
         }
 
-        dealDamage(receiver, damage, { attacker: this, attackName: 'Ataque físico' });
+        if (!damageAlreadyApplied) {
+            dealDamage(receiver, damage, { attacker: this, attackName: moveName, damageCategory: 'cuerpo a cuerpo',
+                ignoreGuard: Boolean(receiver.isGuarding && receiver.guardType && guardBreaks.includes(receiver.guardType)),
+                impactX: this.x + this.width / 2 });
+        }
 
-        if (knockback) {
+        if (knockback && !blockedThisHit) {
             receiver.vx = knockback.vx || 0;
             receiver.vy = knockback.vy || 0;
             receiver.isGrounded = false;
@@ -307,15 +329,18 @@ export class Fighter {
             receiver.knockbackAirTimer = 0;
         }
 
-        receiver.isVulnerable = true;
-        receiver.vulnerableTimer = receiver.vulnerableDuration;
+        if (!blockedThisHit) {
+            receiver.isVulnerable = true;
+            receiver.vulnerableTimer = receiver.vulnerableDuration;
+        }
 
         playSound(hitAudio);
         return true;
     }
 
     updateFacing(opponentX) {
-        const now = performance.now();
+        const now = combatNow();
+        if (now < (this.smokeTurnUntil ?? 0)) return;
         const lockNow = this.isAttacking() || this.isThrowingKunai || this.isThrowingShuriken || this.rocketActive;
         if (lockNow) {
             this.facingLocked = true;
@@ -330,7 +355,7 @@ export class Fighter {
     }
 
     getVisualOpponentX(opponentX) {
-        if (!this.facingLocked) return opponentX;
+        if (!this.facingLocked && combatNow() >= (this.smokeTurnUntil ?? 0)) return opponentX;
         return this.x + (this.facingDirection > 0 ? 10000 : -10000);
     }
 
@@ -349,7 +374,7 @@ export class Fighter {
                     this.isIntroActive = false;
                     this.introDone = true;
                     this.introFrame = 0;
-                    this.bassSprite1BlockedUntil = performance.now() + 3000;
+                    this.bassSprite1BlockedUntil = combatNow() + 3000;
                 }
             }
 
@@ -366,10 +391,6 @@ export class Fighter {
         if (this.heavyCooldown > 0) this.heavyCooldown--;
         if (this.shurikenWindup > 0) this.shurikenWindup--;
 
-        if (this.bulletsReceivedInBurst > 0 && performance.now() - this.lastBulletHitTime > 1000) {
-            this.bulletsReceivedInBurst = 0;
-        }
-
         if (this.isVulnerable) {
             this.vulnerableTimer--;
             if (this.vulnerableTimer <= 0) this.isVulnerable = false;
@@ -379,7 +400,8 @@ export class Fighter {
         const backKey = opponentOnRight ? this.controls.left : this.controls.right;
         const backPressed = this.keys[backKey];
 
-        if (!this.isAttacking() && !this.isSpinDashActive && !this.isSpinning && this.isGrounded && !this.isVulnerable && !this.wasInAirFromKnockback) {
+        const hitstunned = this.isHitstunned();
+        if (!hitstunned && !this.isAttacking() && !this.isSpinDashActive && !this.isSpinning && this.isGrounded && !this.isVulnerable && !this.wasInAirFromKnockback && combatNow() >= (this.guardBrokenUntil || 0)) {
             if (backPressed) {
                 this.isGuarding = true;
                 this.guardType = this.keys[this.controls.crouch] ? "low" : "high";
@@ -392,7 +414,7 @@ export class Fighter {
             this.guardType = null;
         }
 
-        this.isCrouching = this.keys[this.controls.crouch] && this.isGrounded && !this.isSpinDashActive;
+        this.isCrouching = !hitstunned && this.keys[this.controls.crouch] && this.isGrounded && !this.isSpinDashActive;
 
         if (!this.keys[this.controls.crouch] && this.isSpinning && !this.isSpinDashActive) {
             this.isSpinning = false;
@@ -531,7 +553,6 @@ export class Fighter {
                     this.tonguePhase = "idle";
                     this.tongueTimer = 0;
                     this.tongueHitDone = false;
-                    this.lastTongueRects = [];
                 }
             }
         }
@@ -541,9 +562,11 @@ export class Fighter {
             this.kunaiTimer++;
             if (this.kunaiTimer === 8) {
                 const direction = (opponentX > this.x) ? 1 : -1;
+                const shot=this.projectileProfile?.('kunai');
                 game.projectiles.push(new Projectile(
-                    this.x + (direction > 0 ? this.width : -50),
-                    this.y, direction, kunaiImage, 150, 150, 14, 10,
+                    this.x + (direction > 0 ? this.width : -(shot?.width ?? 50)),
+                    shot ? this.y+this.height*.48-70 : this.y, direction,
+                    shot?.images ?? kunaiImage, shot?.width ?? 150, shot?.height ?? 150, 14, 10,
                     false, 'kunai', selfInstance
                 ));
                 playSound(kunaiAudio);
@@ -559,9 +582,11 @@ export class Fighter {
             this.shurikenTimer++;
             if (this.shurikenTimer === 8) {
                 const direction = (opponentX > this.x) ? 1 : -1;
+                const shot=this.projectileProfile?.('shuriken');
                 game.projectiles.push(new Projectile(
-                    this.x + (direction > 0 ? this.width : -50),
-                    this.y - 70, direction, shurikenImages, 210, 210,
+                    this.x + (direction > 0 ? this.width : -(shot?.width ?? 50)),
+                    this.y - 70 + (shot ? this.height*.46 : 0), direction,
+                    shot?.images ?? shurikenImages, shot?.width ?? 210, shot?.height ?? 210,
                     10, 20, true, 'shuriken', selfInstance
                 ));
                 playSound(shurikenAudio);
@@ -573,7 +598,16 @@ export class Fighter {
         }
 
         if (this.isSpinDashActive) {
-            this.vx = this.spinDirection * this.getSpinStat('speed') * (this.spinSpeedMultiplier || 1);
+            const steering=Number(Boolean(this.keys[this.controls.right]))-Number(Boolean(this.keys[this.controls.left]));
+            const braking=this.isGrounded && steering===-this.spinDirection;
+            this.spinBrakeFrames=braking?(this.spinBrakeFrames??0)+1:0;
+            if (this.spinBrakeFrames>=7) {
+                this.spinDirection=steering;
+                this.spinBrakeFrames=0;
+            }
+            const targetSteeringSpeed=braking?.48:1;
+            this.spinSteeringSpeed+=(targetSteeringSpeed-this.spinSteeringSpeed)*.3;
+            this.vx = this.spinDirection * this.getSpinStat('speed') * (this.spinSpeedMultiplier || 1) * this.spinSteeringSpeed;
             if (this.spinDashDurationTimer > 0) {
                 this.spinDashDurationTimer--;
                 if (this.spinDashDurationTimer <= 0) {
@@ -584,7 +618,7 @@ export class Fighter {
         else if (this.isSpinning) {
             this.vx = 0;
         }
-        else if (!this.isAttacking() && !this.isDashing && !this.isCrouching && !this.wasInAirFromKnockback && !this.isVulnerable) {
+        else if (!hitstunned && !this.isAttacking() && !this.isDashing && !this.isCrouching && !this.wasInAirFromKnockback && !this.isVulnerable) {
             const leftPressed = this.keys[this.controls.left];
             const rightPressed = this.keys[this.controls.right];
 
@@ -599,6 +633,10 @@ export class Fighter {
                 this.vx = 0;
                 this.walkReverse = false;
             }
+        }
+        else if (hitstunned && !this.wasInAirFromKnockback) {
+            this.vx *= 0.84;
+            if (Math.abs(this.vx) < 0.2) this.vx = 0;
         }
         else if (this.wasInAirFromKnockback) {}
         else {
@@ -667,8 +705,8 @@ export class Fighter {
         }
 
         // Highway: los pilares laterales son solidos. Zona jugable x=226..2368.
-        const stageLeftWall = 226;
-        const stageRightWall = 2368;
+        const stageLeftWall = HIGHWAY_WALLS[0].x;
+        const stageRightWall = HIGHWAY_WALLS[1].x;
         if (this.x < stageLeftWall) this.x = stageLeftWall;
         if (this.x + this.width > stageRightWall) this.x = stageRightWall - this.width;
     }
@@ -730,30 +768,47 @@ export class Fighter {
 
     chargeSpinDash(opponentX, keyCode) {
         if (keyCode !== this.controls.spinKey) return;
-        if (!this.isCrouching || this.isSpinDashActive || this.isVulnerable || this.isIntroActive) return;
+        const down = this.isCrouching || this.keys[this.controls.crouch];
+        if (!down || !this.isGrounded || this.isSpinDashActive || this.isVulnerable ||
+            this.isIntroActive || this.isHitstunned() || (!this.isSpinning && this.isBusy())) return;
         if (this.spinChargeLevel >= 3) return;
 
-        const now = performance.now();
+        const now = combatNow();
         const interval = (this.spinProfile || getSpinProfile(this.spinProfileName)).chargeIntervalMs;
         if (this.spinChargeLevel > 0 && now - this.spinLastChargeAt < interval) return;
 
         this.isSpinning = true;
-        this.spinChargeLevel++;
+        this.spinChargeLevel = game.mode==='practice' ? 3 : this.spinChargeLevel+1;
         this.spinLastChargeAt = now;
         this.spinDirection = (this.x < opponentX) ? 1 : -1;
         this.playSpinChargeSound();
     }
 
-    releaseSpinDash() {
+    addPower(amount) {
+        this.power = Math.max(0, Math.min(this.maxPower || 100, (this.power || 0) + amount));
+        return this.power;
+    }
+
+    spendPower(amount) {
+        if (game.mode==='practice') return true;
+        if ((this.power || 0) < amount) return false;
+        this.power -= amount;
+        return true;
+    }
+
+    releaseSpinDash(direction = 0) {
         if (!this.isSpinning || this.spinChargeLevel <= 0) return;
         this.stopSpinChargeSound();
         this.isSpinning = false;
         this.isSpinDashActive = true;
+        if (direction) this.spinDirection=direction;
+        this.spinSteeringSpeed=1;
+        this.spinBrakeFrames=0;
         this.spinDashDurationTimer = 360; // hasta 6 segundos a 60 FPS
         this.spinImpactMultiplier = 1;
         this.spinSpeedMultiplier = 1;
         this.spinMaxImpact = this.spinProfileName === 'knuckles' && this.spinChargeLevel === 3;
-        if (this.characterId === 'sonic') { this.sonicSpinHits = 0; this.sonicSpinLastHit = 0; this.sonicAnimStarted = performance.now(); }
+        if (['sonic', 'metal-sonic'].includes(this.characterId)) { this.sonicSpinHits = 0; this.sonicSpinLastHit = 0; this.sonicAnimStarted = combatNow(); }
     }
 
     finishSpinDash(playFinish = true) {
@@ -778,6 +833,14 @@ export class Fighter {
         // Al saltar durante Spin, la hurtbox debe seguir la Y real del personaje.
         if (this.isSpinDashActive && !this.isGrounded) return this.y + (this.height - 140);
         return (this.isCrouching || this.isSpinning || this.isSpinDashActive) ? this.feetY - 140 : this.y;
+    }
+
+    getCurrentBounds(opponentX = this.x) {
+        const frame = this.getPixelBodyFrame?.(opponentX);
+        if (frame && [frame.dx, frame.dy, frame.dw, frame.dh].every(Number.isFinite)) {
+            return { x: frame.dx, y: frame.dy, w: frame.dw, h: frame.dh };
+        }
+        return { x: this.x, y: this.getCurrentY(), w: this.width, h: this.getCurrentHeight() };
     }
 
     getIntroFrames() { return []; }
