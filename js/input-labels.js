@@ -10,8 +10,8 @@ export function setInputDevice(side, device) {
 
 export function xboxCommand(command) {
     const keys = {
-        J:'X', I:'Y', M:'A', K:'B', Q:'RB', E:'RT', Aux1:'RB', Aux2:'RT',
-        Espacio:'L3', WASD:'cruceta o sticks', 'Botón Jet':'L3'
+        J:'X', I:'Y', M:'A', K:'B', Q:'RB', E:'View', Aux1:'RB', Aux2:'View',
+        Espacio:'RT', WASD:'cruceta o sticks', 'Botón Jet':'RT'
     };
     return command.replace(/\bBotón Jet\b|\b(?:WASD|Aux1|Aux2|Espacio|[JIMKQE])\b/g, key => keys[key]);
 }

@@ -262,29 +262,6 @@ export class Eggman extends Fighter {
         }
     }
 
-    readPad(keys) {
-        const side=this===game.p1?'p1':'p2';
-        if (game[side]!==this || game[side==='p1'?'cpuAgentP1':'cpuAgentP2'] ||
-            !['0','go'].includes(game.countdown?.phase)) return keys;
-        const pad=Array.from(navigator.getGamepads?.() ?? []).filter(Boolean)[side==='p1'?0:1];
-        if (!pad) { this.padHeld=null; return keys; }
-        const c=this.controls;
-        const pressed=index=>Boolean(pad.buttons[index]?.pressed);
-        const merged={...keys};
-        merged[c.spinKey] ||= pressed(1);
-        const directions=[[c.left,pad.axes[0]<-.35||pressed(14)],[c.right,pad.axes[0]>.35||pressed(15)],
-            [c.crouch,pad.axes[1]>.35||pressed(13)],[c.jump,pressed(0)||pressed(12)]];
-        for (const [key,down] of directions) merged[key] ||= down;
-        const qr=this===game.p1?['KeyQ','KeyE']:['BracketLeft','BracketRight'];
-        const buttons=[[2,c.attack],[3,c.heavy],[4,c.kickLight],[5,c.kickHeavy],[6,qr[0]],[7,qr[1]],[1,c.spinKey]];
-        const target=game[side==='p1'?'p2':'p1'];
-        this.keys=merged;
-        for (const [button,code] of buttons) if (pressed(button) && !this.padHeld?.[button]) this.command(code,target);
-        this.keys=keys;
-        this.padHeld=pad.buttons.map(button=>button.pressed);
-        return merged;
-    }
-
     updateFuel(now,vertical, floor) {
         const elapsed=Math.max(0,Math.min(50,now-(this.fuelUpdatedAt??now)))/1000;
         this.fuelUpdatedAt=now;
@@ -310,7 +287,7 @@ export class Eggman extends Fighter {
         }
         if (this.isVulnerable && --this.vulnerableTimer<=0) this.isVulnerable=false;
         const c=this.controls;
-        const keys=this.readPad(this.keys);
+        const keys=this.keys;
         const horizontal=Number(Boolean(keys[c.right]))-Number(Boolean(keys[c.left]));
         const vertical=Number(Boolean(keys[c.crouch]))-Number(Boolean(keys[c.jump]));
         const toward=opponentX>=this.x?1:-1;

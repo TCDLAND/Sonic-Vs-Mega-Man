@@ -7,7 +7,7 @@ const files = {
     zero:'zero', x:'X', sonic:'Sonic', shadow:'Shadow', silver:'Silver', bass:'Bass',
     emerl:'Emerl', espio:'Espio', knuckles:'Knuckles', eggman:'Eggman', chaos:'Chaos', tails:'Tails', wily:'Wily'
 };
-const leftFacing = new Set(['silver','zero','emerl']);
+const leftFacing = new Set(['silver','zero','emerl','megaman-zero']);
 const load = name => {
     const image = new Image();
     image.src = 'assets/hud/' + encodeURIComponent(name) + '.png';
