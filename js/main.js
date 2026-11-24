@@ -1,6 +1,6 @@
 import { drawCombatHud, tickReserveHealth } from './combat-hud.js';
 import { pollXboxPads } from './xbox-pad.js';
-import { tickAssistKeys } from './input.js';
+import { tickAssistKeys } from './input.js?v=online-3v3-2';
 import { drawTeamAssists, tickTeamAssists, interceptTeamAssist } from './team-assists.js';
 import { drawWind, emitWind } from './wind-effects.js';
 import { pollStagePad } from './battle-stages.js';
@@ -20,8 +20,8 @@ import { game, ctx, canvas, tongueCtx } from './state.js';
 import { storyStage, showStoryResult, pollStoryPad } from './story-mode.js';
 import { bgImage, trebleSprite1, bassSprite3 } from './assets.js';
 import { drawSelectionScreen } from './selection.js';
-import { drawCountdown, drawModeScreen, drawResultScreen } from './menu-screen.js';
-import { setupInput } from './input.js';
+import { drawCountdown, drawModeScreen, drawResultScreen } from './menu-screen.js?v=online-3v3-2';
+import { setupInput } from './input.js?v=online-3v3-2';
 import { switchTeamFighter } from './battle.js?v=team3-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';

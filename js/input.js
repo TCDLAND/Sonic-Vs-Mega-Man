@@ -23,12 +23,12 @@ import { BusterProjectile, getBusterLevel } from './buster-system.js';
 import { getTouchedWall } from './wall-system.js';
 import { selectionIndexAt, canRandomizeSelection, randomSelectionAt } from './selection.js';
 import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, cancelTournament } from './tournament.js';
-import { modeOptionAt, resultActionAt } from './menu-screen.js';
+import { modeOptionAt, resultActionAt } from './menu-screen.js?v=online-3v3-2';
 import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
 import { toggleBattlePause } from './pause-menu.js';
 import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
-import { openOnlineLobby, handleOnlineSelectionKey, routeOnlineKey } from './online.js';
+import { openOnlineLobby, handleOnlineSelectionKey, routeOnlineKey } from './online.js?v=online-3v3-2';
 
 function isHumanInputForCpu(event) {
     if (!event.isTrusted && !event.gamepadInput) return false;

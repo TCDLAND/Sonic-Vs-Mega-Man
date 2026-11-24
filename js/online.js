@@ -1,7 +1,7 @@
 import { canvas, game } from './state.js';
 import { GAME_STATE } from './config.js';
 import { battleStages, chooseBattleStage, normalizeRoundSeconds } from './battle-stages.js';
-import { startBattle } from './battle.js';
+import { startBattle } from './battle.js?v=online-3v3-2';
 
 const P1_TO_P2 = {
     KeyA: 'ArrowLeft', KeyD: 'ArrowRight', KeyW: 'ArrowUp', KeyS: 'ArrowDown',
@@ -83,10 +83,8 @@ function createRoomDialog() {
       <h2>Reta en línea</h2>
       <p>Conexión directa entre navegadores. El creador será Jugador 1; quien se una será Jugador 2 y también jugará con WASD + JIKM.</p>
       <div class="online-room-actions">
-        <label>Formato para crear una sala<select data-format>
-          <option value="1">1v1</option><option value="3">3v3</option>
-        </select></label>
-        <button type="button" data-create>Crear sala</button>
+        <button type="button" data-create="3">Crear sala 3v3</button>
+        <button type="button" data-create="1">Crear sala 1v1</button>
         <label>Código de sala<input data-room-code maxlength="8" autocomplete="off" placeholder="Ej. A4F92C"></label>
         <button type="button" data-join>Jugar</button>
         <button type="button" data-watch>Espectar</button>
@@ -95,7 +93,9 @@ function createRoomDialog() {
       <button type="button" data-close>Cerrar</button>`;
     document.body.append(dialog);
     statusNode = dialog.querySelector('[data-online-status]');
-    dialog.querySelector('[data-create]').onclick = createRoom;
+    for (const button of dialog.querySelectorAll('[data-create]')) {
+        button.onclick = () => createRoom(Number(button.dataset.create));
+    }
     dialog.querySelector('[data-join]').onclick = () => joinRoom(dialog.querySelector('[data-room-code]').value);
     dialog.querySelector('[data-watch]').onclick = () => joinRoom(dialog.querySelector('[data-room-code]').value, true);
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
@@ -165,11 +165,11 @@ function makePeer(id) {
     }
 }
 
-function createRoom() {
+function createRoom(format) {
     if (peer) return;
     const code = Array.from(crypto.getRandomValues(new Uint8Array(4)), n => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n % 32]).join('');
     roomCode = code;
-    teamSize = Number(dialog.querySelector('[data-format]').value)===3 ? 3 : 1;
+    teamSize = format===3 ? 3 : 1;
     const id = `svm-${code}`;
     if (!makePeer(id)) return;
     role = 'host-pending';
