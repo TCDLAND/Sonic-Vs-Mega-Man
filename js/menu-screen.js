@@ -89,7 +89,7 @@ export function drawModeScreen() {
     ctx.textAlign = 'center';
     ctx.fillStyle = training ? '#fff' : 'rgba(255,255,255,.65)';
     ctx.font = '700 12px system-ui, sans-serif';
-    ctx.fillText('ELIGE AMBOS EQUIPOS  •  CAMBIA CON L', 392, 603);
+    ctx.fillText('ELIGE AMBOS EQUIPOS  •  ASISTENCIA Y RELEVO CON U', 392, 603);
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,.62)';
     ctx.font = '600 13px system-ui, sans-serif';

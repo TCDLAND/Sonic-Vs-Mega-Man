@@ -30,7 +30,7 @@ import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './chara
 import { openOnlineLobby, handleOnlineSelectionKey, routeOnlineKey } from './online.js';
 
 function isHumanInputForCpu(event) {
-    if (!event.isTrusted) return false;
+    if (!event.isTrusted && !event.gamepadInput) return false;
     const red = Object.values(game.p2.controls).includes(event.code) || ['BracketLeft', 'BracketRight', 'Quote'].includes(event.code);
     return Boolean(red ? game.cpuAgentP2 : game.cpuAgentP1);
 }
@@ -90,8 +90,20 @@ function canvasPoint(event) {
     };
 }
 
+const assistKeys = new Map();
+const TAG_HOLD_MS = 350;
+
+export function tickAssistKeys(now) {
+    for (const [key, press] of assistKeys) {
+        if (now - press.started < TAG_HOLD_MS) continue;
+        assistKeys.delete(key);
+        if (game[press.side] === press.fighter) switchTeamFighter(press.side, { slot: press.slot });
+    }
+}
+
 export function setupInput() {
     window.addEventListener('blur', () => {
+        assistKeys.clear();
         for (const fighter of [game.p1, game.p2]) {
             if (!fighter) continue;
             for (const key of Object.keys(fighter.keys)) fighter.keys[key] = false;
@@ -110,7 +122,7 @@ export function setupInput() {
         music.unlock();
         if (sonicWalkKey(e, true) || adventureKey(e, true)) return;
         if (isCharacterGuideOpen() || game.gameState === GAME_STATE.STORY) return;
-        if (game.gameState === GAME_STATE.BATTLE && e.code === 'Escape' && e.isTrusted) {
+        if (game.gameState === GAME_STATE.BATTLE && e.code === 'Escape' && (e.isTrusted || e.gamepadInput)) {
             e.preventDefault();
             if (!e.repeat) toggleBattlePause();
             return;
@@ -223,9 +235,10 @@ export function setupInput() {
 
         if (game.teamFighters && !e.repeat) {
             if (e.code === 'KeyU' || e.code === 'Quote') {
-                const side=e.code==='KeyU'?'p1':'p2';
-                const alternate=Boolean(game[side].keys[game[side].controls.crouch]);
-                requestTeamAssist(side,Number(alternate));
+                const side = e.code === 'KeyU' ? 'p1' : 'p2';
+                const fighter = game[side];
+                assistKeys.set(e.code, { side, fighter, started: combatNow(),
+                    slot: Number(Boolean(fighter.keys[fighter.controls.crouch])) });
                 return;
             }
             if (e.code === 'KeyL') { switchTeamFighter('p1'); return; }
@@ -639,6 +652,15 @@ export function setupInput() {
     });
 
     window.addEventListener('keyup', (e) => {
+        const press = assistKeys.get(e.code);
+        if (press) {
+            assistKeys.delete(e.code);
+            if (!game.paused && game.gameState === GAME_STATE.BATTLE && game[press.side] === press.fighter) {
+                if (combatNow() - press.started >= TAG_HOLD_MS) switchTeamFighter(press.side, { slot: press.slot });
+                else requestTeamAssist(press.side, press.slot);
+            }
+            return;
+        }
         if (routeOnlineKey(e)) return;
         if (sonicWalkKey(e, false) || adventureKey(e, false)) return;
         if (game.paused) return;

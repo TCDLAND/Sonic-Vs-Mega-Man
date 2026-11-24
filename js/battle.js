@@ -163,6 +163,18 @@ export function startBattle(storyMatch) {
         game.p2 = createFighter(p2Char, 1000, floor, p2Controls);
     }
 
+    if (teamMatch) for (const roster of Object.values(game.teamFighters)) {
+        let power = 0;
+        for (const member of roster) {
+            if (member.characterId === 'emerl') continue;
+            member.maxPower = 500;
+            Object.defineProperty(member, 'power', {
+                get: () => power,
+                set: value => { power = Math.max(0, Math.min(500, value)); }
+            });
+        }
+    }
+    game.reserveRecoveryAt = combatNow();
     if (game.mode==='practice') for(const f of [game.p1,game.p2]) f.power=f.maxPower;
     game.p1.startMMZeroIntro?.();
     game.p2.startMMZeroIntro?.();
@@ -184,7 +196,7 @@ function usableTeamCharacters(side) {
     );
 }
 
-export function switchTeamFighter(side, { knockout = false } = {}) {
+export function switchTeamFighter(side, { knockout = false, slot = null } = {}) {
     if (!game.teamFighters || !['p1', 'p2'].includes(side)) return false;
     const now = combatNow();
     if (!knockout && now < (game.tagCooldowns?.[side] || 0)) return false;
@@ -192,15 +204,19 @@ export function switchTeamFighter(side, { knockout = false } = {}) {
     const rival = game[side === 'p1' ? 'p2' : 'p1'];
     if (!knockout && rival?.grabConnected && !rival.grabThrown && rival.grabTarget === outgoing) return false;
     const candidates = usableTeamCharacters(side);
-    if (!outgoing || !candidates.length) return false;
+    if (!outgoing || !candidates.length || (!knockout && (outgoing.health <= 0 || outgoing.tagLockedUntil > now))) return false;
     const currentIndex = game.teamActiveIndex[side];
     const rosterSize = game.teamFighters[side].length;
-    const next = candidates.reduce((best, item) => {
+    const roster = game.teamFighters[side];
+    const reserveIndices = roster.map((_, index) => index).filter(index => index !== currentIndex);
+    const next = slot === null ? candidates.reduce((best, item) => {
         if (!best) return item;
         const distance = (item.index - currentIndex + rosterSize) % rosterSize;
         const bestDistance = (best.index - currentIndex + rosterSize) % rosterSize;
         return distance < bestDistance ? item : best;
-    }, null);
+    }, null) : candidates.find(candidate => candidate.index === reserveIndices[slot]);
+    if (!next) return false;
+    if (!knockout && (game.teamAssists?.[side] || game.silverAssist?.[side] || game.eggAssists?.[side])) return false;
     const opponent = game[side === 'p1' ? 'p2' : 'p1'];
     const oldX = outgoing.x;
     const away = oldX < opponent.x ? -1 : 1;
@@ -226,13 +242,16 @@ export function switchTeamFighter(side, { knockout = false } = {}) {
     for (const key of Object.keys(incoming.keys || {})) incoming.keys[key] = false;
     incoming.tagLockedUntil = now + 760;
     game[side] = incoming;
-    game.teamActiveIndex[side] = next.index;
+    [roster[currentIndex], roster[next.index]] = [incoming, outgoing];
+    incoming.recoverableHealth = 0;
+    incoming.facingDirection = opponent.x >= incoming.x ? 1 : -1;
+    incoming.facingLeft = incoming.facingDirection < 0;
     game.tagCooldowns[side] = now + 6000;
     game.tagEffects.push({
         side,
         style: ['sonic', 'metal-sonic', 'knuckles', 'shadow', 'espio', 'silver', 'emerl', 'tails', 'chaos'].includes(incoming.characterId) ? 'spin' : 'beam',
         startedAt: combatNow(), duration: 760, oldX, edgeX, targetX,
-        enteringId: incoming.characterId, knockout
+        outgoing, enteringId: incoming.characterId, knockout
     });
     return true;
 }

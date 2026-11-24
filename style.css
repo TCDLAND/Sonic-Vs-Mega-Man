@@ -250,3 +250,4 @@ canvas {
 .online-room-dialog button:hover { border-color: #8affdf; background: #205568; }
 .online-room-dialog label { display: grid; gap: 5px; flex: 1; min-width: 180px; color: #b8d4df; font: 700 12px system-ui; }
 .online-room-dialog input { width: 100%; box-sizing: border-box; text-transform: uppercase; }
+.online-spectator { width:min(1200px,94vw); } .online-spectator video { display:block; width:100%; margin-bottom:12px; }

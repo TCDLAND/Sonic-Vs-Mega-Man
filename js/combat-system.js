@@ -1,3 +1,4 @@
+export const RED_HEALTH_FRACTION = .30;
 import { impactWind } from './wind-effects.js';
 import { combatNow } from './combat-clock.js';
 import { captureTournamentHit } from './tournament-damage.js';
@@ -224,6 +225,10 @@ export function dealDamage(receiver, baseDamage, options = {}) {
     receiver.onBlockedHit?.();
   }
 
+  receiver.recoverableHealth = receiver.health > 0
+    ? Math.max(0, Math.min(receiver.maxHealth - receiver.health,
+        (receiver.recoverableHealth || 0) + Math.max(0, healthBeforeHit - receiver.health) * RED_HEALTH_FRACTION))
+    : 0;
   const who = receiver === window.__GAME_P1__ ? 'P1' : receiver === window.__GAME_P2__ ? 'P2' : receiver.characterName || 'Fighter';
   const attackerName = attacker?.characterName || attacker?.characterId || 'Sistema';
   const msg = `${who} recibió ${finalDamage} | HP ${receiver.health}/${receiver.maxHealth ?? MAX_HEALTH}`;

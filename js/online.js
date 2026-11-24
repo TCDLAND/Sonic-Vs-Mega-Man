@@ -1,4 +1,4 @@
-import { game } from './state.js';
+import { canvas, game } from './state.js';
 import { GAME_STATE } from './config.js';
 import { battleStages, chooseBattleStage } from './battle-stages.js';
 import { startBattle } from './battle.js';
@@ -16,6 +16,9 @@ let dialog = null;
 let statusNode = null;
 let stagePickerOpened = false;
 let inputSequence = 0;
+let roomCode;
+const viewers = new Map();
+let broadcast;
 
 function setStatus(message) {
     game.onlineStatus = message;
@@ -40,7 +43,7 @@ function setUpOnlineGame(localRole) {
     game.characterSelection.p1Confirmed = false;
     game.characterSelection.p2Confirmed = false;
     game.gameState = GAME_STATE.SELECT;
-    setStatus(localRole === 'host' ? 'Sala lista · tú eres Jugador 1' : 'Conectado · tú eres Jugador 2');
+    setStatus(localRole === 'host' ? `Jugador 1 · Código para espectadores: ${roomCode}` : 'Conectado · tú eres Jugador 2');
     if (dialog?.open) dialog.close();
     if (localRole === 'host') sendSelectionState();
 }
@@ -60,7 +63,7 @@ function maybeChooseStage() {
         send({ type: 'battle-start', stageId: game.battleStage?.id,
             p1Index: game.characterSelection.p1Index, p2Index: game.characterSelection.p2Index });
         startBattle();
-        setStatus('En línea · Jugador 1: WASD + JIKM · Jugador 2: su WASD + JIKM');
+        setStatus(`En línea · Código para espectadores: ${roomCode}`);
     });
 }
 
@@ -73,8 +76,9 @@ function createRoomDialog() {
       <p>Conexión directa entre navegadores. El creador será Jugador 1; quien se una será Jugador 2 y también jugará con WASD + JIKM.</p>
       <div class="online-room-actions">
         <button type="button" data-create>Crear sala</button>
-        <label>Código de tu primo<input data-room-code maxlength="8" autocomplete="off" placeholder="Ej. A4F92C"></label>
-        <button type="button" data-join>Unirse</button>
+        <label>Código de sala<input data-room-code maxlength="8" autocomplete="off" placeholder="Ej. A4F92C"></label>
+        <button type="button" data-join>Jugar</button>
+        <button type="button" data-watch>Espectar</button>
       </div>
       <p data-online-status>Elige crear una sala o unirte con un código.</p>
       <button type="button" data-close>Cerrar</button>`;
@@ -82,6 +86,7 @@ function createRoomDialog() {
     statusNode = dialog.querySelector('[data-online-status]');
     dialog.querySelector('[data-create]').onclick = createRoom;
     dialog.querySelector('[data-join]').onclick = () => joinRoom(dialog.querySelector('[data-room-code]').value);
+    dialog.querySelector('[data-watch]').onclick = () => joinRoom(dialog.querySelector('[data-room-code]').value, true);
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
     dialog.addEventListener('close', () => {
         if (!role || role.endsWith('-pending')) {
@@ -101,6 +106,25 @@ function peerLibrary() {
 }
 
 function attachHostConnection(conn) {
+    if (conn.metadata?.spectator) {
+        if (viewers.size >= 4) { conn.close(); return; }
+        viewers.set(conn, null);
+        conn.on('open', () => {
+            try {
+                broadcast ??= canvas.captureStream(30);
+                viewers.set(conn, peer.call(conn.peer, broadcast, { metadata: { spectator: true } }));
+            } catch { conn.close(); }
+        });
+        conn.on('close', () => {
+            viewers.get(conn)?.close();
+            viewers.delete(conn);
+            if (!viewers.size) {
+                broadcast?.getTracks().forEach(track => track.stop());
+                broadcast = null;
+            }
+        });
+        return;
+    }
     if (connection && connection !== conn) { conn.close(); return; }
     connection = conn;
     conn.on('open', () => setStatus('Invitado conectado · preparando selección'));
@@ -117,7 +141,7 @@ function makePeer(id) {
         peer.on('error', error => {
             const messages = {
                 'unavailable-id': 'Ese código ya está ocupado. Crea otra sala.',
-                'peer-unavailable': 'No encontramos esa sala. Revisa el código y que tu primo siga conectado.',
+                'peer-unavailable': 'No encontramos esa sala. Revisa el código y que tu rival siga conectado.',
                 'network': 'No se pudo alcanzar el servidor gratuito de señalización.'
             };
             setStatus(messages[error.type] || `Error de conexión: ${error.message || error.type}`);
@@ -133,24 +157,25 @@ function makePeer(id) {
 function createRoom() {
     if (peer) return;
     const code = Array.from(crypto.getRandomValues(new Uint8Array(4)), n => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n % 32]).join('');
+    roomCode = code;
     const id = `svm-${code}`;
     if (!makePeer(id)) return;
     role = 'host-pending';
     setStatus('Creando sala…');
     peer.on('open', () => {
-        setStatus(`Comparte este código con tu primo: ${code}`);
+        setStatus(`Comparte este código con tu rival: ${code}`);
         const copy = document.createElement('button');
         copy.type = 'button'; copy.textContent = 'Copiar código';
         copy.onclick = async () => {
             try { await navigator.clipboard.writeText(code); setStatus(`Código ${code} copiado. Esperando al Jugador 2…`); }
-            catch { setStatus(`Código de sala: ${code} · escríbelo a tu primo`); }
+            catch { setStatus(`Código de sala: ${code} · escríbelo a tu rival`); }
         };
         dialog.querySelector('.online-room-actions').append(copy);
         peer.on('connection', attachHostConnection);
     });
 }
 
-function joinRoom(rawCode) {
+function joinRoom(rawCode, watch = false) {
     if (peer) return;
     const code = String(rawCode || '').trim().toUpperCase().replace(/^SVM-/, '');
     if (!/^[A-HJ-NP-Z2-9]{4,8}$/.test(code)) {
@@ -158,12 +183,32 @@ function joinRoom(rawCode) {
     }
     if (!makePeer()) return;
     role = 'guest-pending';
+    if (watch) peer.on('call', call => {
+        if (call.peer !== `svm-${code}` || !call.metadata?.spectator) return;
+        call.on('stream', stream => {
+            role = 'spectator';
+            const screen = document.createElement('dialog');
+            screen.className = 'online-room-dialog online-spectator';
+            const video = document.createElement('video');
+            video.autoplay = true; video.playsInline = true; video.muted = true; video.srcObject = stream;
+            const close = document.createElement('button');
+            close.textContent = 'Salir de espectador';
+            close.onclick = () => screen.close();
+            screen.onclose = () => {
+                screen.remove(); peer?.destroy(); peer = null; connection = null; role = null;
+            };
+            call.on('close', () => { close.textContent = 'Transmisión terminada · Salir'; });
+            if (dialog?.open) dialog.close();
+            screen.append(video, close); document.body.append(screen); screen.showModal();
+        });
+        call.answer();
+    });
     setStatus('Conectando con el anfitrión…');
     peer.on('open', () => {
-        connection = peer.connect(`svm-${code}`, { reliable: true });
+        connection = peer.connect(`svm-${code}`, { reliable: true, metadata: { spectator: watch } });
         connection.on('open', () => {
             setStatus('Sala encontrada · esperando al anfitrión');
-            send({ type: 'hello' });
+            if (!watch) send({ type: 'hello' });
         });
         connection.on('data', handleGuestMessage);
         connection.on('close', () => { connection = null; setStatus('Se perdió la conexión con el anfitrión'); });
@@ -228,6 +273,7 @@ export function onlineRole() { return role; }
 export function isForwardedOnlineKey(event) { return Boolean(event.__onlineForwarded); }
 
 export function routeOnlineKey(event) {
+    if (role === 'spectator') return true;
     if (game.mode !== 'online' || !['host', 'guest'].includes(role)) return false;
     const inBattle = game.gameState === GAME_STATE.BATTLE;
     const inResult = game.gameState === GAME_STATE.RESULT;
@@ -239,6 +285,7 @@ export function routeOnlineKey(event) {
         event.preventDefault(); return true;
     }
     if (!inBattle) return false;
+    if (!event.__onlineForwarded && !Object.hasOwn(P1_TO_P2,event.code) && event.code !== 'Escape') return true;
     if (event.code === 'Escape') { event.preventDefault(); return true; }
 
     if (role === 'host') {

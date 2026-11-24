@@ -7,12 +7,19 @@ import { drawRobotFrame, drawRobotShot } from './robot-sprites.js';
 import { requestSilverAssist } from './silver.js';
 import { requestEggAssist } from './eggman.js';
 
-const cooldown=9000;
+const cooldown=1200;
 const kit={
     sonic:{name:'Windmill',clip:'sonic-battle-windmill',reach:135,damage:9,step:7},
     'metal-sonic':{name:'Fireball Crash',clip:'fireball',reach:135,damage:10,step:8},
     knuckles:{name:'Upper',clip:'upper',reach:104,damage:11,launch:-8},
     shadow:{name:'Shadow Slider',clip:'slider',reach:119,damage:9,step:7},
+    espio:{name:'Golpe ninja',clip:'jab',reach:110,damage:8,step:5},
+    zero:{name:'Z-Saber',clip:'saber',reach:122,damage:10,step:5},
+    'megaman-zero':{name:'Z-Saber',clip:'saber',reach:122,damage:10,step:5},
+    chaos:{name:'Brazo de Chaos',clip:'attack',reach:130,damage:9,step:4},
+    tails:{name:'Tail Swipe',clip:'attack',reach:110,damage:8,step:5},
+    wily:{name:'Disparo de apoyo',clip:'shot',shot:true,damage:8},
+    emerl:{name:'Golpe de apoyo',clip:'punch',reach:108,damage:9,step:5},
     x:{name:'Buster',clip:'shot',shot:true,damage:9},
     rock:{name:'Mega Buster',clip:'fire',shot:true,damage:7},
     bass:{name:'Ráfaga Bass Buster',clip:'upShot',shot:true,burst:true,damage:3},
@@ -25,12 +32,12 @@ const rivalSide=side=>side==='p1'?'p2':'p1';
 export function teamAssistSlots(side) {
     const roster=game.teamFighters?.[side]??[];
     const active=game.teamActiveIndex?.[side]??0;
-    return roster.map((_,i)=>roster[(active+i+1)%roster.length]).filter(reserve=>reserve!==game[side]);
+    return roster.filter((_,index)=>index!==active);
 }
 
 export function resetTeamAssists() {
     game.teamAssists={};
-    game.teamAssistReady={p1:0,p2:0};
+
 }
 
 export function canAssist(fighter) {
@@ -38,18 +45,12 @@ export function canAssist(fighter) {
         ['silver','eggman'].includes(fighter.characterId)));
 }
 
-export function teamAssistStatus(side) {
-    const slots=teamAssistSlots(side);
-    const seconds=Math.ceil(Math.max(0,(game.teamAssistReady?.[side]||0)-combatNow())/1000);
-    return {slots,seconds};
-}
-
 export function requestTeamAssist(side,slot=0,{defensive=false}={}) {
     const now=combatNow(), active=game[side], enemy=game[rivalSide(side)];
     const reserve=teamAssistSlots(side)[slot];
     if (!canAssist(reserve) || !active || !enemy || active.health<=0 ||
         game.teamAssists?.[side] || game.silverAssist?.[side] || game.eggAssists?.[side] ||
-        now<(game.teamAssistReady?.[side]||0) || active.tagLockedUntil>now || active.shadowFrozenBy ||
+        now<(reserve.teamAssistReadyAt||0) || active.tagLockedUntil>now || active.shadowFrozenBy ||
         !['0','go'].includes(game.countdown?.phase)) return false;
     let started;
     if (reserve.characterId==='silver') started=requestSilverAssist(side,slot===1&&!defensive,reserve);
@@ -62,7 +63,7 @@ export function requestTeamAssist(side,slot=0,{defensive=false}={}) {
         game.teamAssists[side]={active,reserve,spec,direction,x,started:now,floor:active.feetY,phase:0};
         started=true;
     }
-    if (started) game.teamAssistReady[side]=now+cooldown;
+    if (started) reserve.teamAssistReadyAt=now+825+cooldown;
     return started;
 }
 

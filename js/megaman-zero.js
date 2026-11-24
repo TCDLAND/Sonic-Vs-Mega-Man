@@ -136,7 +136,7 @@ function weaponShot(owner,key,direction,shotAt,level=1){
 export class MegaManZero extends PrototypeFighter {
     constructor(x,y,controls) {
         super(x,y,controls,{name:'MM ZERO',color:'#ca343e',hasSonicJump:false,speed:7.35});
-        configureCombatant(this,'megaman-zero','MM ZERO');
+        configureCombatant(this,'megaman-zero','MM Zero');
         this.dashSpeed=18.5;
         this.dashAnimationSpeed=.19;
         this.pose={key:'idle',at:combatNow(),dir:1};

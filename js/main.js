@@ -1,4 +1,7 @@
-import { drawTeamAssists, tickTeamAssists, interceptTeamAssist, teamAssistStatus, canAssist } from './team-assists.js';
+import { drawCombatHud, tickReserveHealth } from './combat-hud.js';
+import { pollXboxPads } from './xbox-pad.js';
+import { tickAssistKeys } from './input.js';
+import { drawTeamAssists, tickTeamAssists, interceptTeamAssist } from './team-assists.js';
 import { drawWind, emitWind } from './wind-effects.js';
 import { pollStagePad } from './battle-stages.js';
 import { tickSonicWalk, drawMetalDialogue } from './sonic-chapter.js';
@@ -232,141 +235,6 @@ function updateCountdown(now) {
     }
 }
 
-function drawPowerBars(p1, p2) {
-    const draw = (fighter, x, color, alignRight = false) => {
-        const width = 330, y = 18, height = 13;
-        const ratio = Math.max(0, Math.min(1, (fighter.power || 0) / (fighter.maxPower || 100)));
-        ctx.save();
-        ctx.fillStyle = 'rgba(4,7,18,.84)';
-        ctx.fillRect(x - 5, y - 5, width + 10, 39);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
-        ctx.fillStyle = '#151a2b';
-        ctx.fillRect(x + 2, y + 2, width - 4, height - 4);
-        ctx.fillStyle = color;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = ratio >= 1 ? 14 : 5;
-        const fillWidth = (width - 4) * ratio;
-        ctx.fillRect(alignRight ? x + width - 2 - fillWidth : x + 2, y + 2, fillWidth, height - 4);
-        ctx.shadowBlur = 0;
-        if (fighter.maxPower>100) {
-            ctx.fillStyle='#151a2b';
-            for (let value=100;value<fighter.maxPower;value+=100) ctx.fillRect(x+width*value/fighter.maxPower-1,y,2,height);
-        }
-        ctx.fillStyle = '#fff';
-        ctx.textAlign = alignRight ? 'right' : 'left';
-        ctx.font = '800 11px system-ui, sans-serif';
-        ctx.fillText(`${fighter.superSilver ? 'SUPER SILVER' : fighter.superSonic ? 'SUPER SONIC' : fighter.isSuperShadow ? 'SUPER SHADOW' : fighter.characterName || fighter.characterId}  •  PODER ${Math.floor(fighter.power || 0)} / ${fighter.maxPower || 100}`, alignRight ? x + width : x, y + 31);
-        if (fighter.maxFuel) {
-            const fuel=fighter.fuel/fighter.maxFuel, gaugeWidth=108;
-            const gaugeX=alignRight?x+width-gaugeWidth:x;
-            ctx.fillStyle='#202638';
-            ctx.fillRect(gaugeX,y+48,gaugeWidth,5);
-            ctx.fillStyle=fuel<.18?'#ff745a':'#ffc45a';
-            ctx.fillRect(alignRight?gaugeX+gaugeWidth*(1-fuel):gaugeX,y+48,gaugeWidth*fuel,5);
-            ctx.fillText('COMBUSTIBLE '+Math.floor(fighter.fuel)+'%',alignRight?gaugeX-8:gaugeX+gaugeWidth+8,y+54);
-        }
-        if (fighter.weaponLabel) {
-            ctx.fillStyle='#aef5f2';
-            ctx.fillText(fighter.weaponLabel,alignRight ? x + width : x,y+45);
-        }
-        if (fighter.shieldMaxIntegrity) {
-            const integrity=fighter.shieldIntegrity/fighter.shieldMaxIntegrity;
-            const broken=fighter.shieldBrokenUntil>combatNow();
-            const label=broken?'ESCUDO ROTO':'ESCUDO '+Math.ceil(integrity*100)+'%';
-            ctx.fillStyle=broken?'#ff8b7e':integrity<.35?'#ffc96b':'#a4ffbe';
-            ctx.fillText(label,alignRight?x+width:x,y+58);
-        }
-        if (fighter.leafShield && !fighter.leafShield.thrown &&
-            (fighter.leafShield.active || fighter.leafBlockUntil>combatNow())) {
-            const leaves=fighter.leafShield.leaves.filter(leaf=>leaf.alive).length;
-            ctx.fillStyle=fighter.leafBlockUntil>combatNow()?'#fff4a8':'#a4ffbe';
-            ctx.fillText('LEAF SHIELD '+leaves+'/4',alignRight?x+width:x,y+58);
-        }
-        ctx.restore();
-    };
-    draw(p1, 34, '#25aaff');
-    draw(p2, 916, '#ff4267', true);
-}
-
-function drawTeamStocks() {
-    if (!['team', 'story'].includes(game.mode) || !game.teamFighters?.p1) return;
-    const reserve = game.teamFighters.p1.some((fighter, index) =>
-        index !== game.teamActiveIndex.p1 && fighter.health > 0);
-    const seconds = Math.max(0, Math.ceil(((game.tagCooldowns.p1 || 0) - combatNow()) / 1000));
-    const label = !reserve ? 'SIN RELEVO' : seconds > 0 ? `RELEVO EN ${seconds} s` : 'L · CAMBIAR PELEADOR';
-    ctx.save();
-    ctx.fillStyle = '#a9ddff';
-    ctx.font = '800 11px system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(label, 34, game.p1.maxFuel?142:67);
-    for (const side of ['p1','p2']) {
-        const {slots,seconds:assistSeconds}=teamAssistStatus(side);
-        if (!slots.length) continue;
-        const blue=side==='p1', key=blue?'U':"’";
-        const names=slots.map(f=>f.health<=0?'KO':canAssist(f)?(f.characterName||f.characterId):'—');
-        ctx.textAlign=blue?'left':'right';
-        ctx.fillStyle=blue?'#a9ddff':'#ff9eb1';
-        ctx.fillText(assistSeconds?('ASISTENCIA EN '+assistSeconds+' s'):key+' '+names[0]+'  /  ABAJO + '+key+' '+(names[1]??'·'),
-            blue?34:1246,126);
-    }
-    ctx.restore();
-}
-
-function drawHealthBars(p1, p2) {
-    const sides = [
-        { side: 'p1', fighter: p1, x: 34, color: '#25aaff', alignRight: false },
-        { side: 'p2', fighter: p2, x: 916, color: '#ff4267', alignRight: true }
-    ];
-    for (const item of sides) {
-        const team = game.teamFighters?.[item.side];
-        const fighters = team?.length ? team : [item.fighter];
-        const x = item.x, y = 86, width = 330, height = 17, gap = fighters.length > 1 ? 4 : 0;
-        const segmentWidth = (width - gap * (fighters.length - 1)) / fighters.length;
-        ctx.save();
-        ctx.fillStyle = 'rgba(4,7,18,.88)';
-        ctx.fillRect(x - 5, 78, width + 10, 39);
-        ctx.fillStyle = item.color;
-        ctx.textAlign = item.alignRight ? 'right' : 'left';
-        ctx.font = '800 10px system-ui, sans-serif';
-        ctx.fillText(fighters.length > 1 ? `${item.side.toUpperCase()} • EQUIPO` : (item.fighter.characterName || item.fighter.characterId), item.alignRight ? x + width : x, 84);
-        fighters.forEach((fighter, index) => {
-            const sx = x + index * (segmentWidth + gap);
-            const ratio = Math.max(0, Math.min(1, fighter.health / fighter.maxHealth));
-            ctx.fillStyle = '#202638';
-            ctx.fillRect(sx, y, segmentWidth, height);
-            ctx.fillStyle = ratio > .5 ? '#39e66b' : ratio > .25 ? '#ffbf35' : '#ff455d';
-            ctx.fillRect(sx, y, Math.max(0, segmentWidth * ratio), height);
-            if (fighters.length > 1) {
-                if (index > 0) { ctx.fillStyle = '#050812'; ctx.fillRect(sx - gap, y, gap, height); }
-                ctx.fillStyle = '#fff';
-                ctx.font = '700 9px system-ui, sans-serif';
-                ctx.textAlign = item.alignRight ? 'right' : 'left';
-                const name = `${index === game.teamActiveIndex[item.side] ? '▶ ' : ''}${fighter.characterName || fighter.characterId}`;
-                ctx.fillText(name, item.alignRight ? sx + segmentWidth : sx, y + height + 12);
-            } else {
-                ctx.fillStyle = '#fff';
-                ctx.font = '700 10px system-ui, sans-serif';
-                ctx.textAlign = item.alignRight ? 'right' : 'left';
-                ctx.fillText(`${Math.ceil(fighter.health)} / ${fighter.maxHealth}`, item.alignRight ? x + width : x, y + height + 12);
-            }
-        });
-        const rock = fighters.find((fighter) => fighter.characterId === 'rock' && fighter.weaponSet !== 'base');
-        if (rock) {
-            const ammo = Math.max(0, Math.min(100, rock.weaponAmmo?.[rock.weaponSet] ?? 0));
-            const ammoX = item.alignRight ? x + width - 112 : x;
-            ctx.fillStyle = '#111827'; ctx.fillRect(ammoX, 123, 112, 9);
-            ctx.fillStyle = item.color; ctx.fillRect(ammoX, 123, 112 * ammo / 100, 9);
-            ctx.fillStyle = '#fff'; ctx.font = '700 9px system-ui, sans-serif';
-            ctx.textAlign = item.alignRight ? 'right' : 'left';
-            const kit = { cut_concrete: 'CUT/CONCRETE', fire: 'FIRE', leaf_snake: 'LEAF/SNAKE' }[rock.weaponSet] || rock.weaponSet;
-            ctx.fillText(`${kit} • AMMO ${Math.floor(ammo)}`, item.alignRight ? x + width : x, 142);
-        }
-        ctx.restore();
-    }
-}
-
 function drawTagEffects(now) {
     game.tagEffects = game.tagEffects.filter((effect) => now - effect.startedAt < effect.duration);
     for (const effect of game.tagEffects) {
@@ -378,6 +246,14 @@ function drawTagEffects(now) {
         const worldX = start + (end - start) * phase;
         const x = worldX - game.cameraX;
         const y = 600 - 78;
+        if (outgoing && !effect.knockout && effect.outgoing) {
+            const rival = game[effect.side === 'p1' ? 'p2' : 'p1'];
+            ctx.save();
+            ctx.globalAlpha = 1-phase;
+            ctx.translate(worldX-effect.outgoing.x,0);
+            effect.outgoing.draw(rival.x);
+            ctx.restore();
+        }
         const color = effect.side === 'p1' ? '#28aaff' : '#ff3e65';
         ctx.save();
         ctx.shadowColor = color;
@@ -585,6 +461,9 @@ function gameLoop(time = performance.now(), render = true) {
                 landOnStagePlatform(p2,oldFeet[1],game.battleStage.platforms);
         }
         const now = combatNow();
+        tickAssistKeys(now);
+        p1 = game.p1; p2 = game.p2;
+        tickReserveHealth(now);
         updateCountdown(now);
         const canFight = game.countdown?.phase === '0' || game.countdown?.phase === 'go';
         if (canFight && game.mode!=='practice' && game.roundEndsAt === null) game.roundEndsAt = now + (game.tournamentSeconds??99)*1000;
@@ -682,14 +561,18 @@ function gameLoop(time = performance.now(), render = true) {
             fighter.isVulnerable = false; fighter.vulnerableTimer = 0;
         }
 
+        let waitingForReplacement = false;
         if (game.teamFighters) {
-            let swapped = false;
-            if (p1.health <= 0) swapped = switchTeamFighter('p1', { knockout: true }) || swapped;
-            if (p2.health <= 0) swapped = switchTeamFighter('p2', { knockout: true }) || swapped;
-            if (swapped) {
-                p1 = game.p1; p2 = game.p2;
-                window.__GAME_P1__ = p1; window.__GAME_P2__ = p2;
+            for (const side of ['p1','p2']) {
+                const fallen = game[side];
+                if (fallen.health > 0 || !game.teamFighters[side].some(member=>member.health>0)) continue;
+                fallen.koAt ??= now;
+                for (const key of Object.keys(fallen.keys)) fallen.keys[key] = false;
+                if (now-fallen.koAt < 420) waitingForReplacement = true;
+                else switchTeamFighter(side, { knockout: true });
             }
+            p1 = game.p1; p2 = game.p2;
+            window.__GAME_P1__ = p1; window.__GAME_P2__ = p2;
         }
 
         if (render) {
@@ -736,9 +619,9 @@ function gameLoop(time = performance.now(), render = true) {
         if (p2.characterId === 'cut' && p2.isIntroActive) {
                 return;
         }
-        drawPowerBars(p1, p2);
-        drawTeamStocks();
-        drawHealthBars(p1, p2);
+
+
+        drawCombatHud(now, game.mode==='practice'?'∞':remaining);
         for (const [fighter,x] of [[p1,34],[p2,916]]) if(fighter.characterId==='wily') {
             ctx.save();
             ctx.fillStyle='#161b2a';
@@ -758,18 +641,8 @@ function gameLoop(time = performance.now(), render = true) {
         drawGuardEffects(p1,p2);
         drawOffscreenFighter(p1, '#a9ddff');
         drawOffscreenFighter(p2, '#ff9eb1');
-        ctx.save();
-        ctx.font = '900 36px system-ui';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#101627';
-        ctx.lineWidth = 5;
-        const clockLabel=game.mode==='practice'?'∞':String(remaining);
-        ctx.strokeText(clockLabel, canvas.width / 2, 98);
-        ctx.fillText(clockLabel, canvas.width / 2, 98);
-        ctx.restore();
         drawCountdown();
-        if (canFight) {
+        if (canFight && game.mode !== 'online') {
             ctx.save();
             ctx.font = '700 12px system-ui';
             ctx.textAlign = 'center';
@@ -784,7 +657,7 @@ function gameLoop(time = performance.now(), render = true) {
             p1.health > 0 && p2.health <= p2.maxHealth * .20;
         if (game.mode==='practice') {
             for(const fighter of [p1,p2]) if(fighter.health<=0) fighter.health=fighter.maxHealth;
-        } else if (emerlRetreat || remaining === 0 || p1.health <= 0 || p2.health <= 0) {
+        } else if (emerlRetreat || remaining === 0 || (!waitingForReplacement && (p1.health <= 0 || p2.health <= 0))) {
             const totalHealth = (side) => (game.teamFighters?.[side] || [game[side]])
                 .reduce((total, fighter) => total + Math.round(Math.max(0, fighter.health) * 100), 0);
             const blue = totalHealth('p1'), red = totalHealth('p2');
@@ -821,6 +694,7 @@ function gameLoop(time = performance.now(), render = true) {
 }
 
 function frameDriver(time) {
+    if (!tournamentSimulationActive()) pollXboxPads();
     if (!tournamentSimulationActive()) gameLoop(time);
     else if (!game.paused && !tournamentSimulationPaused() && !document.hidden) {
         const render=!game.quietSimulation;
