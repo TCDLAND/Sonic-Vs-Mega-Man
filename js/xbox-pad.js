@@ -3,6 +3,7 @@ import { game } from './state.js';
 import { GAME_STATE } from './config.js';
 
 const held = new Map();
+const spinFaceHeld = new Set();
 const keys = [
     { left:'KeyA',right:'KeyD',up:'KeyW',down:'KeyS',attack:'KeyJ',heavy:'KeyI',
       light:'KeyM',kick:'KeyK',spin:'Space',aux1:'KeyQ',aux2:'KeyE',assist:'KeyU' },
@@ -43,13 +44,22 @@ export function pollXboxPads() {
             return;
         }
         const k=keys[i], battle=game.gameState===GAME_STATE.BATTLE;
+        const side = game.mode==='online' && game.onlineRole==='guest' ? 'p2' : i===0 ? 'p1' : 'p2';
+        const fighter = game[side];
+        const down = directions[3] || battle&&b(11);
+        const crouchAttack = battle && fighter?.supportsSpin && down && b(7) && b(0);
+        if (!battle || !b(0)) spinFaceHeld.delete(pad.index);
+        else if (fighter?.supportsSpin && fighter.isGrounded && down && !crouchAttack &&
+            !held.has(k.light)) spinFaceHeld.add(pad.index);
+        const spinFace = battle && spinFaceHeld.has(pad.index);
         const mapping=[[directions[0],k.left],[directions[1],k.right],[directions[2],k.up],
-            [directions[3],k.down],[battle&&b(5),k.aux1],[battle&&b(8),k.aux2],
-            [battle&&b(7),k.spin],[battle&&b(4),`p${i+1}:reserve:0`],[battle&&b(6),`p${i+1}:reserve:1`],
-            [battle?b(2):b(0),k.attack],[battle&&b(3),k.heavy],[battle&&b(0),k.light],
-            [battle&&b(1),k.kick],[battle&&b(11),k.down],[b(9)&&i===0,'Escape'],[!battle&&b(3)&&i===0,'KeyG']];
+            [down,k.down],[battle&&b(5),k.aux1],[battle&&b(8),k.aux2],
+            [battle&&((b(7)&&!(down&&fighter?.supportsSpin))||(spinFace&&down&&!crouchAttack)),k.spin],[battle&&b(4),`p${i+1}:reserve:0`],[battle&&b(6),`p${i+1}:reserve:1`],
+            [battle?b(2):b(0),k.attack],[battle&&b(3),k.heavy],[battle&&b(0)&&(!spinFace||crouchAttack),k.light],
+            [battle&&b(1),k.kick],[b(9)&&i===0,'Escape'],[!battle&&b(3)&&i===0,'KeyG']];
         for(const [on,code] of mapping) if (on) pressed.set(code,device);
     });
+    for (const index of spinFaceHeld) if (!pads.some(pad=>pad.index===index)) spinFaceHeld.delete(index);
     for(const code of held.keys()) if(!pressed.has(code)) {
         if(!code.startsWith('dialog-')) emit(code,false);
         held.delete(code);

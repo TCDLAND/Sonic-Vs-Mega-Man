@@ -1,4 +1,4 @@
-import { usingXbox, xboxCommand } from './input-labels.js';
+import { padSpinChord, usingXbox, xboxCommand } from './input-labels.js';
 import { storyRobotGuide } from './story-robot.js';
 import { BUSTER_CONFIGS } from './buster-system.js';
 import { getSelectionRoster } from './selection.js';
@@ -123,9 +123,14 @@ export function openCharacterGuide() {
         const rows = moves[id] || (BUSTER_CONFIGS[id] ? [['Buster', 'Mantén J y suelta']] : []);
         const list = element('dl', '', 'guide-commands');
         const commands = [...rows];
-        if (SPIN_PROFILES[id] || ['emerl', 'metal-sonic'].includes(id)) commands.push(['Spin Dash', 'Abajo + Espacio']);
+        if (SPIN_PROFILES[id] || ['emerl', 'metal-sonic'].includes(id)) commands.push(['Spin Dash', usingXbox() ? padSpinChord() : 'Abajo + Espacio']);
         for (const [name, command] of commands) list.append(element('dt', name),
-            element('dd', commandLabel(command.replaceAll('Aux1', 'Q').replaceAll('Aux2', 'E').replaceAll('Botón Jet', 'Espacio'))));
+            element('dd', (() => {
+                const label=commandLabel(command.replaceAll('Aux1', 'Q').replaceAll('Aux2', 'E').replaceAll('Botón Jet', 'Espacio'));
+                if (!usingXbox() || name==='Spin Dash' || !(SPIN_PROFILES[id] || ['emerl','metal-sonic'].includes(id))) return label;
+                const chord=padSpinChord();
+                return label.replaceAll(chord,chord==='Abajo + A'?'Abajo + RT + A':'Abajo + R2 + ✕');
+            })()));
         info.replaceChildren(select, element('h2', entry.label), createAnimationPreview(id),
             element('p', summaries[id]), element('h3', 'Habilidades · Jugador 1'),
             commands.length ? list : element('p', 'Este personaje todavía tiene un kit provisional.'));

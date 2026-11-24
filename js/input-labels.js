@@ -12,6 +12,10 @@ export function padDevice(id) {
     return /054c|dualsense|dualshock|playstation|wireless controller \(sony/i.test(id ?? '') && !/xbox/i.test(id) ? 'playstation' : 'xbox';
 }
 
+export function padSpinChord(side = 'p1') {
+    return deviceFor(side) === 'playstation' ? 'Abajo + ✕' : 'Abajo + A';
+}
+
 export function xboxCommand(command, side = 'p1') {
     const keys = {
         J:'X', I:'Y', M:'A', K:'B', Q:'RB', E:'View', Aux1:'RB', Aux2:'View',

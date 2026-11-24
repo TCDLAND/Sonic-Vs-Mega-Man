@@ -1,4 +1,4 @@
-import { deviceFor, usingXbox, xboxCommand } from './input-labels.js';
+import { deviceFor, padSpinChord, usingXbox, xboxCommand } from './input-labels.js';
 import { music } from './music.js';
 import { game } from './state.js';
 import { applyBattleControllers, returnToCharacterSelect } from './battle.js?v=team3-1';
@@ -175,7 +175,8 @@ function playerPanel(active, side) {
         ['Mover / saltar / agacharse',pad?'Cruceta o sticks · ↑ salto · ↓ agacharse':blue?'A / D · W · S':'← / → · ↑ · ↓'],
         ['Guardia / dash','Atrás / doble toque de dirección'], ...attacks
     ] : (essentialMoves[fighter.characterId]?.map(index=>attacks[index]).filter(Boolean) ?? attacks.slice(0,3));
-    if (fighter.supportsSpin) rows.push(['Spin Dash', 'Mantén abajo + Botón Jet. Suelta abajo para salir']);
+    if (fighter.supportsSpin) rows.push(['Spin Dash',
+        (pad ? padSpinChord(side) : 'Abajo + Botón Jet')+'. Suelta abajo para salir']);
     if (state.full && fighter.characterId === 'rock') rows.push(['Pedir Eddie', 'Aux2 + I']);
     if (state.full && team.length > 1) {
         const assist = blue?'U':'Apóstrofo';
@@ -196,7 +197,13 @@ function playerPanel(active, side) {
             if (key==='Botón Jet'||key==='Espacio') return blue?'Espacio':'Enter';
             return blue?key:buttonNames[key];
         });
-        detail.textContent = pad ? xboxCommand(command,side) : withAux;
+        let text = pad ? xboxCommand(command,side) : withAux;
+        if (pad && fighter.supportsSpin && name !== 'Spin Dash') {
+            const crouchLight = deviceFor(side)==='playstation'?'Abajo + ✕':'Abajo + A';
+            const alternative = deviceFor(side)==='playstation'?'Abajo + R2 + ✕':'Abajo + RT + A';
+            text = text.replaceAll(crouchLight,alternative);
+        }
+        detail.textContent = text;
         list.append(term, detail);
     }
     panel.append(heading,list,button(state.full?'Volver a comandos esenciales':'Ver los demás ataques',()=>{
