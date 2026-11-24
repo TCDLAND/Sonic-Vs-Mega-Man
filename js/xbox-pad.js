@@ -1,3 +1,4 @@
+import { setInputDevice } from './input-labels.js';
 import { game } from './state.js';
 import { GAME_STATE } from './config.js';
 
@@ -10,8 +11,13 @@ const keys = [
 ];
 
 function emit(code,down) {
+    const reserve = /^(p[12]):reserve:([01])$/.exec(code);
+    const side = reserve?.[1] ?? (Object.values(keys[1]).includes(code) ? 'p2' : 'p1');
+    if (down) setInputDevice(side,'xbox');
+    if (reserve) code = keys[Number(side==='p2')].assist;
     const event=new KeyboardEvent(down?'keydown':'keyup',{code,bubbles:true,cancelable:true});
     Object.defineProperty(event,'gamepadInput',{value:true});
+    if (reserve) Object.defineProperty(event,'assistSlot',{value:Number(reserve[2])});
     window.dispatchEvent(event);
 }
 
@@ -33,10 +39,10 @@ export function pollXboxPads() {
         }
         const k=keys[i], battle=game.gameState===GAME_STATE.BATTLE;
         const mapping=[[directions[0],k.left],[directions[1],k.right],[directions[2],k.up],
-            [directions[3],k.down],[battle&&b(4),k.aux1],[battle&&b(5),k.aux2],
-            [battle&&b(6),k.spin],[battle&&b(7),k.assist],[battle&&b(8),k.tag],
-            [battle?b(2):b(0),k.attack],[battle&&b(3),k.heavy],[battle&&(b(0)||b(10)),k.light],
-            [battle&&b(1),k.kick],[battle&&b(11),k.down],[b(9)&&i===0,'Escape']];
+            [directions[3],k.down],[battle&&b(5),k.aux1],[battle&&b(7),k.aux2],
+            [battle&&b(10),k.spin],[battle&&b(4),`p${i+1}:reserve:0`],[battle&&b(6),`p${i+1}:reserve:1`],[battle&&b(8),k.tag],
+            [battle?b(2):b(0),k.attack],[battle&&b(3),k.heavy],[battle&&b(0),k.light],
+            [battle&&b(1),k.kick],[battle&&b(11),k.down],[b(9)&&i===0,'Escape'],[!battle&&b(3)&&i===0,'KeyG']];
         for(const [on,code] of mapping) if (on) pressed.add(code);
     });
     for(const code of held.keys()) if(!pressed.has(code)) {
@@ -46,6 +52,7 @@ export function pollXboxPads() {
     for(const code of pressed) {
         if(held.has(code)) continue;
         held.set(code,true);
+        if(code.startsWith('dialog-')) setInputDevice('p1','xbox');
         if(code==='dialog-confirm') document.activeElement?.click();
         else if(code==='dialog-back') {
             const cancel=new Event('cancel',{cancelable:true});

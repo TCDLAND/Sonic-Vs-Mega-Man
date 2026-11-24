@@ -1,3 +1,4 @@
+import { usingXbox } from './input-labels.js';
 import { ctx, canvas, game } from './state.js';
 
 const W = 1280;
@@ -89,7 +90,7 @@ export function drawModeScreen() {
     ctx.textAlign = 'center';
     ctx.fillStyle = training ? '#fff' : 'rgba(255,255,255,.65)';
     ctx.font = '700 12px system-ui, sans-serif';
-    ctx.fillText('ELIGE AMBOS EQUIPOS  •  ASISTENCIA Y RELEVO CON U', 392, 603);
+    ctx.fillText('ELIGE AMBOS EQUIPOS  •  ASISTENCIA Y RELEVO · U / LB / LT', 392, 603);
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,.62)';
     ctx.font = '600 13px system-ui, sans-serif';
@@ -102,11 +103,11 @@ export function drawModeScreen() {
     ctx.fillText('PODER Y MUNICIÓN INFINITOS · CARGA INSTANTÁNEA',887,603);
     ctx.fillStyle='rgba(255,255,255,.62)';
     ctx.font='600 13px system-ui, sans-serif';
-    ctx.fillText('A / D o ← / → PARA CAMBIAR     •     J / , / ENTER PARA ELEGIR', W / 2, 703);
+    ctx.fillText(usingXbox()?'CRUCETA O STICK PARA CAMBIAR     •     A PARA ELEGIR':'A / D o ← / → PARA CAMBIAR     •     J / , / ENTER PARA ELEGIR', W / 2, 703);
     rounded(145, 637, 300, 40, 9, '#162945', '#83c9ff', 2);
     ctx.fillStyle = '#e4f6ff';
     ctx.font = '800 15px system-ui';
-    ctx.fillText('GUÍA DE PERSONAJES  ·  G',295,663);
+    ctx.fillText(usingXbox()?'GUÍA DE PERSONAJES  ·  Y':'GUÍA DE PERSONAJES  ·  G',295,663);
     rounded(490,637,300,40,9,'#123c45',game.modeCursor===6?'#79ffe1':'#4ca598',game.modeCursor===6?4:2);
     ctx.fillStyle='#d7fff6';ctx.fillText('ONLINE · SALA 1v1',640,663);
     rounded(835,637,300,40,9,'#3d265d',game.modeCursor===5?'#dec1ff':'#9070c0',game.modeCursor===5?4:2);

@@ -1,3 +1,4 @@
+import { usingXbox, xboxCommand } from './input-labels.js';
 import { music } from './music.js';
 import { game } from './state.js';
 import { applyBattleControllers, returnToCharacterSelect } from './battle.js?v=team3-1';
@@ -13,7 +14,7 @@ export const moves = {
         ['Upper Fist / Iron Crusher','M / K'], ['Bola de demolición','Q y mantén WASD para dirigir; Abajo + Q inicia el barrido bajo'], ['Órbita 360°','Espacio + Q desde reposo'], ['Bola en llamas','Durante o justo después del dash, pulsa Q'],
         ['Dash aéreo','Dirección + Espacio, también en diagonal'], ['Scrap Toss / Missile Launch','E / Hacia el rival + E'],
         ['Egg Bomb','Abajo + E'], ['Agarre Eggmobile','Arriba + M'],
-        ['Vuelo','WASD en las cuatro direcciones. Espacio sin dirección para defender'], ['Combustible','El vuelo consume combustible y subir consume más. El dash cuesta 18%. Baja al suelo para recargar'], ['Asistencia 3v3','U · bola / Abajo + U · chatarra'], ['Mando Xbox','Stick o cruceta para volar, X combo, Y especial, LB ascendente, RB Crusher, LT bola, RT proyectil, B impulso'], ['Wrecking Ball Rampage / Egg Crusher Protocol','I / Abajo + I']],
+        ['Vuelo','WASD en las cuatro direcciones. Espacio sin dirección para defender'], ['Combustible','El vuelo consume combustible y subir consume más. El dash cuesta 18%. Baja al suelo para recargar'], ['Wrecking Ball Rampage / Egg Crusher Protocol','I / Abajo + I']],
     emerl: [['Puño', 'J'], ['Patada de onda', 'I en el suelo'], ['Patada alta', 'M'], ['Patada giratoria', 'K en el suelo'], ['Patada Rocket', 'K en el aire'], ['Copia de historia · Buster', 'Mantén J y suelta'], ['Sets copiados', 'Sigue automáticamente el set de Rock durante el duelo']],
     x: [['Buster de cuatro niveles', 'Mantén J y suelta, en suelo o aire'],
         ['Sable en suelo o en salto', 'M'], ['Salto de pared', 'Salto junto a la pared'],
@@ -131,29 +132,28 @@ function playerPanel(fighter, side) {
     label.append(select);
     const list = document.createElement('dl');
     const rows = [
-        ['Mover / saltar / agacharse', blue ? 'A / D · W · S' : '← / → · ↑ · ↓'],
+        ['Mover / saltar / agacharse', usingXbox(side) ? 'Cruceta o sticks · ↑ salto · ↓ agacharse' : blue ? 'A / D · W · S' : '← / → · ↑ · ↓'],
         ['Guardia / dash', 'Atrás / doble toque de dirección'],
         ...(moves[fighter.characterId] || (fighter.hasBuster ? [['Buster', 'Mantén J y suelta']] : []))
     ];
-    if (fighter.supportsSpin) rows.push(['Spin Dash', (blue?'Abajo + Espacio':'Abajo + Enter')+
+    if (fighter.supportsSpin) rows.push(['Spin Dash', (blue||usingXbox(side)?'Abajo + Espacio':'Abajo + Enter')+
         ' para cargar. Mantén dirección al soltar abajo. En el suelo, mantén la opuesta para frenar y girar.']);
     if (fighter.characterId === 'espio' || fighter.characterId === 'rock') {
-        rows.push(['Diagonales auxiliares', blue ? 'Q / E' : '[ / ]']);
+        rows.push(['Diagonales auxiliares', blue||usingXbox(side) ? 'Q / E' : '[ / ]']);
     }
-    if (fighter.characterId === 'rock') rows.push(['Pedir Eddie', blue ? 'E + I' : '] + Punto']);
+    if (fighter.characterId === 'rock') rows.push(['Pedir Eddie', blue||usingXbox(side) ? 'E + I' : '] + Punto']);
     if (game.teamFighters) {
-        rows.push(['Relevo', blue ? 'L' : '/']);
-        if (game.teamFighters[side]?.some(member=>member!==fighter&&member.characterId==='silver')) {
-            const assistKey=blue?'U':'Tecla de apóstrofo';
-            rows.push(['Asistencia de Silver', assistKey+' para absorción / Abajo + '+assistKey+' para empuje']);
-        }
+        const assist = blue?'U':'Apóstrofo';
+        rows.push(['Asistencia / relevo', usingXbox(side)
+            ? 'LB para el personaje 2 · LT para el personaje 3 · toca para asistencia o mantén para relevo'
+            : assist+' para el personaje 2 · Abajo + '+assist+' para el personaje 3 · toca para asistencia o mantén para relevo']);
     }
     for (const [name, command] of rows) {
         const term = document.createElement('dt');
         const detail = document.createElement('dd');
         term.textContent = name;
         const withAux = command.replaceAll('Aux1', blue ? 'Q' : '[').replaceAll('Aux2', blue ? 'E' : ']').replaceAll('Botón Jet', blue ? 'Espacio' : 'Enter');
-        detail.textContent = blue ? withAux : withAux.replace(/\b[JIMK]\b/g, key => buttonNames[key]);
+        detail.textContent = usingXbox(side) ? xboxCommand(command) : blue ? withAux : withAux.replace(/\b[JIMK]\b/g, key => buttonNames[key]);
         list.append(term, detail);
     }
     panel.append(title, label, list);
@@ -184,7 +184,7 @@ export function toggleBattlePause() {
     title.textContent = 'Pausa';
     const resume = document.createElement('button');
     resume.type = 'button';
-    resume.textContent = 'Continuar · Esc';
+    resume.textContent = usingXbox() ? 'Continuar · B' : 'Continuar · Esc';
     resume.addEventListener('click', toggleBattlePause);
     header.append(title, resume);
     if(game.mode==='practice'){

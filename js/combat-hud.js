@@ -1,3 +1,5 @@
+import { usingXbox } from './input-labels.js';
+import { canAssist } from './team-assists.js';
 import { ctx, game } from './state.js';
 
 const files = {
@@ -44,11 +46,12 @@ function plate(x,y,w,h,color,inset) {
     ctx.strokeStyle='#edf6ff'; ctx.lineWidth=1.4; ctx.stroke();
 }
 
-function portrait(f,x,y,size,right) {
+function portrait(f,x,y,size,right,unavailable) {
     const img=faces[f.characterId];
     ctx.save();
     ctx.imageSmoothingEnabled=true;
     if (f.health<=0) { ctx.filter='grayscale(1)'; ctx.globalAlpha=.43; }
+    else if (unavailable) ctx.globalAlpha=.48;
     ctx.save();
     polygon(x+3,y+7,size-6,size-14,size*.23); ctx.clip();
     if (img?.naturalWidth) {
@@ -75,7 +78,10 @@ export function drawCombatHud(now,remaining) {
         const reflect=(x,w)=>right?1280-x-w:x;
         const team=game.teamFighters?.[side] ?? [active];
         const fighters=[active,...team.filter(f=>f!==active)];
-        const tag=game.tagEffects?.findLast(effect=>effect.side===side);
+        const rival = game[right?'p1':'p2'];
+        const assistOnScreen = game.teamAssists?.[side] || game.silverAssist?.[side] || game.eggAssists?.[side];
+        const locked = Boolean(assistOnScreen || active.health<=0 || active.tagLockedUntil>now);
+        const tag= game.tagEffects?.findLast(effect=>effect.side===side);
         fighters.forEach((f,i)=>{
             const main=i===0, y=main?39:116+(i-1)*35, w=main?473:260, h=main?62:28;
             const bx=main?88:83, x=reflect(bx,w);
@@ -100,13 +106,26 @@ export function drawCombatHud(now,remaining) {
             const size=main?110:55;
             const py=y+(h-size)/2;
             const slide=tag && (main || f===tag.outgoing)? Math.max(0,1-(now-tag.startedAt)/220)*14 : 0;
-            portrait(f,reflect((main?14:42)-slide,size),py,size,right);
+            const assistWait = Math.max(0,(f.teamAssistReadyAt || 0)-now);
+            const tagWait = Math.max(0,(game.tagCooldowns?.[side] || 0)-now);
+            const assistReady = !locked && !active.shadowFrozenBy && canAssist(f) && !assistWait &&
+                ['0','go'].includes(game.countdown?.phase);
+            const tagReady = !locked && f.health>0 && !tagWait &&
+                !(rival?.grabConnected && !rival.grabThrown && rival.grabTarget===active);
+            portrait(f,reflect((main?14:42)-slide,size),py,size,right,
+                !main && (!assistReady || !tagReady));
             ctx.textAlign=right?'right':'left';
             ctx.fillStyle='#fff'; ctx.font='italic 900 20px system-ui';
             if(main) ctx.fillText((f.characterId==='megaman-zero'?'MM Zero':f.characterName || f.characterId).toUpperCase(),right?x+w-44:x+44,y+24,w-86);
-            else if (f.health>0 && f.teamAssistReadyAt>now) {
-                ctx.font='800 11px system-ui';
-                ctx.fillText(Math.ceil((f.teamAssistReadyAt-now)/1000)+' s',right?x+24:x+w-24,y+11);
+            else {
+                ctx.font='800 9px system-ui';
+                const status = f.health<=0 ? 'KO' : [
+                    'ASIST. '+(assistReady?'✓':assistWait?Math.ceil(assistWait/1000)+' s':'—'),
+                    'RELEVO '+(tagReady?'✓':tagWait?Math.ceil(tagWait/1000)+' s':'—')
+                ].join(' · ');
+                const textX = right ? x+20 : x+w-20;
+                ctx.strokeStyle='#081022'; ctx.lineWidth=3; ctx.strokeText(status,textX,y+24);
+                ctx.fillText(status,textX,y+24);
             }
         });
         const power=active.power || 0, level=Math.floor(power/100), max=active.maxPower||100;
@@ -136,7 +155,9 @@ export function drawCombatHud(now,remaining) {
         if(active.leafShield?.active&&!active.leafShield.thrown) labels.push('HOJAS '+active.leafShield.leaves.filter(leaf=>leaf.alive).length+'/4');
         if(active.characterId==='emerl') labels.push('PODER '+Math.floor(power)+'/'+max);
         if(active.superSilver||active.superSonic||active.isSuperShadow) labels.push('SUPER');
-        if(team.length>1) labels.push((right?'’':'U')+' ASISTENCIA · MANTÉN PARA RELEVO · ABAJO = RESERVA 2');
+        if(team.length>1) labels.push(usingXbox(side)
+            ? 'LB PERSONAJE 2 · LT PERSONAJE 3 · MANTÉN PARA RELEVO'
+            : (right?'’':'U')+' PERSONAJE 2 · ABAJO + '+(right?'’':'U')+' PERSONAJE 3 · MANTÉN PARA RELEVO');
         ctx.fillText(labels.join('  ·  '),right?1254:26,637,560);
     }
     plate(557,46,88,60,'#299aff',16); plate(635,46,88,60,'#ff4878',16);

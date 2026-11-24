@@ -1,3 +1,4 @@
+import { usingXbox, xboxCommand } from './input-labels.js';
 import { storyRobotGuide } from './story-robot.js';
 import { BUSTER_CONFIGS } from './buster-system.js';
 import { getSelectionRoster } from './selection.js';
@@ -101,14 +102,15 @@ export function openCharacterGuide() {
     const masterSelect = document.createElement('select');
     masterSelect.setAttribute('aria-label', 'Robot Master de Wily');
     for (const [id, entry] of Object.entries(storyRobotGuide)) masterSelect.add(new Option(entry.name, id));
+    const commandLabel = text => usingXbox() ? xboxCommand(text) : text;
     const render = () => {
         const entry = roster.find(item => item.id === select.value);
         if (entry.id === 'wily') {
             const robot = storyRobotGuide[masterSelect.value];
             const list = element('dl', '', 'guide-commands');
-            for (const [name, description] of moves.wily) list.append(element('dt',name),element('dd',description));
+            for (const [name, description] of moves.wily) list.append(element('dt',name),element('dd',commandLabel(description)));
             for (const [name, description, damage] of robot.moves) {
-                list.append(element('dt', name), element('dd', description + ' Daño base: ' + damage + '.'));
+                list.append(element('dt', name), element('dd', commandLabel(description) + ' Daño base: ' + damage + '.'));
             }
             if (masterSelect.value === 'cut') {
                 list.append(element('dt', 'Entrada'), element('dd', 'Oscurece la arena y entra por la esquina superior derecha.'));
@@ -123,7 +125,7 @@ export function openCharacterGuide() {
         const commands = [...rows];
         if (SPIN_PROFILES[id] || ['emerl', 'metal-sonic'].includes(id)) commands.push(['Spin Dash', 'Abajo + Espacio']);
         for (const [name, command] of commands) list.append(element('dt', name),
-            element('dd', command.replaceAll('Aux1', 'Q').replaceAll('Aux2', 'E').replaceAll('Botón Jet', 'Espacio')));
+            element('dd', commandLabel(command.replaceAll('Aux1', 'Q').replaceAll('Aux2', 'E').replaceAll('Botón Jet', 'Espacio'))));
         info.replaceChildren(select, element('h2', entry.label), createAnimationPreview(id),
             element('p', summaries[id]), element('h3', 'Habilidades · Jugador 1'),
             commands.length ? list : element('p', 'Este personaje todavía tiene un kit provisional.'));
@@ -144,6 +146,8 @@ export function openCharacterGuide() {
     masterSelect.addEventListener('change', render);
     layout.append(info, stats);
     dialog.replaceChildren(header, layout);
+    window.addEventListener('input-device-change',render);
+    dialog.addEventListener('close',()=>window.removeEventListener('input-device-change',render),{once:true});
     render();
     dialog.showModal();
 }

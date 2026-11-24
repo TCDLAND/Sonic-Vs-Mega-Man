@@ -1,3 +1,4 @@
+import { setInputDevice } from './input-labels.js';
 import { chooseBattleStage } from './battle-stages.js';
 import { music } from './music.js';
 import { adventureKey } from './story-platform.js';
@@ -116,6 +117,10 @@ export function setupInput() {
         }
     });
     window.addEventListener('keydown', (e) => {
+        if (e.isTrusted) {
+            const red = /^Arrow|^(Comma|Period|Minus|Equal|BracketLeft|BracketRight|Quote|Slash)$/.test(e.code);
+            setInputDevice(red && game.mode!=='online' ? 'p2' : 'p1','keyboard');
+        }
         if (routeOnlineKey(e)) return;
         if(e.isTrusted && tournamentRunning() && e.code==='Escape') { e.preventDefault();cancelTournament();return; }
         if(e.isTrusted && tournamentSimulationActive()) return;
@@ -237,8 +242,8 @@ export function setupInput() {
             if (e.code === 'KeyU' || e.code === 'Quote') {
                 const side = e.code === 'KeyU' ? 'p1' : 'p2';
                 const fighter = game[side];
-                assistKeys.set(e.code, { side, fighter, started: combatNow(),
-                    slot: Number(Boolean(fighter.keys[fighter.controls.crouch])) });
+                assistKeys.set(e.assistSlot == null ? e.code : e.code + e.assistSlot, { side, fighter, started: combatNow(),
+                    slot: e.assistSlot ?? Number(Boolean(fighter.keys[fighter.controls.crouch])) });
                 return;
             }
             if (e.code === 'KeyL') { switchTeamFighter('p1'); return; }
@@ -652,9 +657,10 @@ export function setupInput() {
     });
 
     window.addEventListener('keyup', (e) => {
-        const press = assistKeys.get(e.code);
+        const assistKey = e.assistSlot == null ? e.code : e.code + e.assistSlot;
+        const press = assistKeys.get(assistKey);
         if (press) {
-            assistKeys.delete(e.code);
+            assistKeys.delete(assistKey);
             if (!game.paused && game.gameState === GAME_STATE.BATTLE && game[press.side] === press.fighter) {
                 if (combatNow() - press.started >= TAG_HOLD_MS) switchTeamFighter(press.side, { slot: press.slot });
                 else requestTeamAssist(press.side, press.slot);
