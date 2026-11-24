@@ -449,6 +449,10 @@ function gameLoop(time = performance.now(), render = true) {
         }
 
         // Chaos Control congela al rival; el propio Shadow sigue activo.
+        const formTime = combatNow();
+        for (const fighter of game.teamFighters ? [...game.teamFighters.p1,...game.teamFighters.p2] : [p1,p2]) {
+            if (fighter.superEndsAt != null && formTime >= fighter.superEndsAt) fighter.endSuperForm();
+        }
         const oldFeet=[p1.y+p1.height,p2.y+p2.height];
         const grabbedBy = (target, opponent) => opponent.grabConnected &&
             !opponent.grabThrown && opponent.grabTarget === target;

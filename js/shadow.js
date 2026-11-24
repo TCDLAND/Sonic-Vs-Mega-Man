@@ -1,3 +1,4 @@
+import { SUPER_COST, SUPER_DURATION, CHAOS_CONTROL_COST } from './config.js';
 import { updatedFrame } from './fighter-update-art.js';
 import { formFrame } from './super-forms.js';
 import { drawRobotFrame } from './robot-sprites.js';
@@ -125,15 +126,20 @@ export class Shadow extends PrototypeFighter {
     this.superTapAt = -10000;
     if (!this.isGrounded || this.isBusy() || this.isIntroActive || this.isHitstunned() || this.isVulnerable) return;
     if (this.isSuperShadow) {
-      this.isSuperShadow = false;
-      this.speed = 7.5;
+      this.endSuperForm();
       return;
     }
-    if (!this.spendPower(100)) return;
+    if (!this.spendPower(SUPER_COST)) return;
     this.superChangeAt = now;
     this.isGuarding = false;
     this.isCrouching = false;
     this.vx = 0;
+  }
+
+  endSuperForm() {
+    this.isSuperShadow=false;
+    this.superEndsAt=null;
+    this.speed=7.5;
   }
 
   drawSuperChange() {
@@ -326,6 +332,7 @@ export class Shadow extends PrototypeFighter {
     const now=combatNow();
     if(this.isBusy()||this.shadowCombo||this.shadowTeleportPhase||this.chaosPhase||this.isIntroActive||this.isVulnerable||
       this.isHitstunned()||(game.mode!=='practice'&&now<(this.nightmareReadyAt??0)))return false;
+    if (!this.spendPower(CHAOS_CONTROL_COST)) return false;
     this.nightmareReadyAt=now+7500;
     this.chaosPhase='windup';this.chaosTick=0;this.chaosRadius=0;
     this.chaosTarget=null;this.chaosDamage=0;this.vx=0;this.vy=0;
@@ -606,7 +613,8 @@ ctx.strokeStyle='#cba4ff';ctx.lineWidth=4;ctx.beginPath();ctx.arc(centerX,center
     if(this.battleTechnique)this.keys={};
     if (this.superChangeAt != null) {
       const elapsed = combatNow() - this.superChangeAt;
-      if (elapsed >= SUPER_FLASH_AT) {
+      if (elapsed >= SUPER_FLASH_AT && !this.isSuperShadow) {
+        this.superEndsAt=combatNow()+SUPER_DURATION;
         this.isSuperShadow = true;
         this.speed = 8.6;
       }

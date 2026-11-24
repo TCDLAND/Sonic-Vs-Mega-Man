@@ -1,3 +1,4 @@
+import { SUPER_COST, SUPER_DURATION } from './config.js';
 import { configureCombatant, dealDamage } from './combat-system.js';
 import { PrototypeFighter } from './prototype-fighter.js';
 import { combatNow } from './combat-clock.js';
@@ -154,18 +155,23 @@ export class Silver extends PrototypeFighter {
         this.superTapAt=-Infinity;
         if (!this.isGrounded || this.isBusy() || this.isVulnerable || this.isIntroActive || this.tagLockedUntil>now) return;
         if (this.superSilver) {
-            this.superSilver=false;
-            this.speed=5.6;
-            this.dashSpeed=22.4;
-            this.defenseMultiplier=this.baseDefense;
+            this.endSuperForm();
             return;
         }
         this.startSuperChange();
     }
 
+    endSuperForm() {
+        this.superSilver=false;
+        this.superEndsAt=null;
+        this.speed=5.6;
+        this.dashSpeed=22.4;
+        this.defenseMultiplier=this.baseDefense;
+    }
+
     startSuperChange() {
         if (this.superSilver || !this.isGrounded || this.isBusy() || this.isVulnerable ||
-            this.isIntroActive || this.tagLockedUntil>combatNow() || !this.spendPower(100)) return false;
+            this.isIntroActive || this.tagLockedUntil>combatNow() || !this.spendPower(SUPER_COST)) return false;
         this.transformAt=combatNow();
         this.isCrouching=false;
         this.vx=0;
@@ -437,7 +443,8 @@ export class Silver extends PrototypeFighter {
         const now=combatNow(), grounded=this.isGrounded;
         const move=this.robotMove;
         const transforming=this.transformAt!=null;
-        if (transforming && now-this.transformAt>=680) {
+        if (transforming && !this.superSilver && now-this.transformAt>=680) {
+            this.superEndsAt=now+SUPER_DURATION;
             this.superSilver=true;
             this.speed=7;
             this.dashSpeed=27;

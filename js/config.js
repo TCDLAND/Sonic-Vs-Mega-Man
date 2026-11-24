@@ -14,3 +14,7 @@ export const GAME_STATE = {
     BATTLE: "battle",
     RESULT: "result"
 };
+
+export const SUPER_COST = 300;
+export const SUPER_DURATION = 30000;
+export const CHAOS_CONTROL_COST = 200;

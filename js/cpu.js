@@ -1040,7 +1040,7 @@ export class CpuFighter {
         }
         if (cpu.characterId==='silver' && now>=this.characterCooldownUntil) {
             const air=!cpu.isGrounded, roll=this.random();
-            if (!air && !threatened && cpu.power>=100 && cpu.health<105 &&
+            if (!air && !threatened && cpu.power>=300 && cpu.health<105 &&
                 distance>380 && roll<.42 && cpu.startSuperChange()) {
                 this.setMovement(cpu,false,false);
                 this.recordAction('silver_transform');

@@ -1,3 +1,4 @@
+import { SUPER_COST, SUPER_DURATION } from './config.js';
 import { updatedFrame } from './fighter-update-art.js';
 import { HIGHWAY_WALLS } from './wall-system.js';
 import { sonicCommand, updateSonicMove, hitSonicMove, sonicMoveFrame, drawSonicMoveEffects } from './sonic-battle-kit.js';
@@ -78,10 +79,16 @@ export class Sonic extends PrototypeFighter {
     if(now-(this.sonicSuperTap??-Infinity)>300){this.sonicSuperTap=now;return;}
     this.sonicSuperTap=null;
     if(!this.isGrounded||this.isBusy()||this.isVulnerable)return;
-    if(this.superSonic){this.superSonic=false;this.speed=8;return;}
-    if(!this.spendPower(100))return;
+    if(this.superSonic){this.endSuperForm();return;}
+    if(!this.spendPower(SUPER_COST))return;
     this.sonicSuperAt=now;
     this.vx=0;
+  }
+
+  endSuperForm() {
+    this.superSonic=false;
+    this.superEndsAt=null;
+    this.speed=8;
   }
 
   getSuperSonicFrame(opponentX){
@@ -179,7 +186,7 @@ export class Sonic extends PrototypeFighter {
     const keys=this.keys;
     if(this.sonicSuperAt!=null) {
       const age=combatNow()-this.sonicSuperAt;
-      if(age>=640){this.superSonic=true;this.speed=9.2;}
+      if(age>=640&&!this.superSonic){this.superSonic=true;this.speed=9.2;this.superEndsAt=combatNow()+SUPER_DURATION;}
       if(age>=1050)this.sonicSuperAt=null;
       else this.keys={};
     }

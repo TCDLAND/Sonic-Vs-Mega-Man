@@ -166,6 +166,9 @@ export function startBattle(storyMatch) {
         game.p2 = createFighter(p2Char, 1000, floor, p2Controls);
     }
 
+    for (const fighter of [game.p1,game.p2]) {
+        if (['sonic','shadow','silver'].includes(fighter.characterId)) fighter.maxPower=300;
+    }
     if (teamMatch) for (const roster of Object.values(game.teamFighters)) {
         let power = 0;
         for (const member of roster) {
