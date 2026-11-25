@@ -79,11 +79,13 @@ function beginRoundRobinRun(options) {
     if(IS_SIMULATION_LANE || options.kind!=='roundRobin') return;
     const roster=[...options.roster];
     const rosterSize=roster.length;
-    const expectedMatches=(options.total||1)*(options.mirrors?rosterSize*rosterSize:rosterSize*(rosterSize-1));
+    const expectedMatches=(options.total||1)*(options.uniquePairs?rosterSize*(rosterSize-1)/2:
+        options.mirrors?rosterSize*rosterSize:rosterSize*(rosterSize-1));
     stats.roundRobinLatest=emptyRoundRobinReport();
     stats.roundRobinLatest.run={
-        roster, mirrors:Boolean(options.mirrors), repetitions:options.total||1,
-        concurrency:options.concurrency||1, expectedMatches, completedMatches:0,
+        roster, mirrors:Boolean(options.mirrors), uniquePairs:Boolean(options.uniquePairs),
+        unlimitedTime:Boolean(options.unlimitedTime), repetitions:options.total||1,
+        concurrency:options.concurrency||1, expectedMatches, completedMatches:0, skippedMatches:0,
         status:'in-progress', startedAt:new Date().toISOString()
     };
     delete stats.lastSimulationError;
@@ -209,7 +211,7 @@ function launch([first,second],swap=false) {
     game.battleStage=battleStages[0];
     game.mode=current.teamSize===3?'team':'cpu';
     game.controlOverrides={p1:!pair[0].human,p2:!pair[1].human};
-    game.tournamentSeconds=current.simulate?SIM_SECONDS:TURN_SECONDS;
+    game.tournamentSeconds=current.simulate?(current.unlimitedTime?null:SIM_SECONDS):TURN_SECONDS;
     startBattle({rosters:pair.map(entry=>entry.roster),isolateCpu:current.simulate});
     if (pair.every(entry=>!entry.human)) beginTournamentDamage(game.teamFighters);
     if(current.simulate) {
@@ -292,6 +294,24 @@ export function tournamentResult(winner,reason) {
         game.gameState=GAME_STATE.MODE;
         showStatus();
     }
+    return true;
+}
+
+export function skipCurrentSimulationCombat() {
+    if(!IS_SIMULATION_LANE||!current?.simulate||!current.activePair||!current.uniquePairs)return false;
+    const pair=current.activePair;
+    const match=current.matches+1;
+    endTournamentDamage();
+    current.activePair=null;
+    current.matches++;
+    window.parent.postMessage({type:'svmm-simulation-combat-state',laneId:current.laneId,
+        state:'skipped',blue:keyOf(pair[0]),red:keyOf(pair[1]),match},location.origin);
+    window.parent.postMessage({type:'svmm-simulation-progress',laneId:current.laneId,
+        matches:current.matches,total:current.pairs.length*current.total,skipped:true},location.origin);
+    if(current.matches>=current.pairs.length*current.total) {
+        persist();
+        finish('Todos contra todos completo');
+    } else launch(current.pairs[current.matches%current.pairs.length]);
     return true;
 }
 function finish(message) {
@@ -419,6 +439,7 @@ export function startTournament(options) {
         const entries=options.roster.map(id=>({roster:[id]}));
         current.pairs=options.lanePairs
             ? options.lanePairs.map(([a,b])=>[{roster:[a]},{roster:[b]}])
+            : current.uniquePairs?entries.flatMap((a,i)=>entries.slice(i+1).map(b=>[a,b]))
             : entries.flatMap((a,i)=>entries.slice(i).flatMap(b=>a===b?
                 options.mirrors?[[a,b]]:[]:[[a,b],[b,a]]));
         details.hidden=true;
@@ -447,8 +468,9 @@ function startParallelRoundRobin(options) {
     const matches=[];
     for(let repeat=0;repeat<options.total;repeat++) {
         for(let i=0;i<options.roster.length;i++) {
-            for(let j=options.mirrors?i:i+1;j<options.roster.length;j++) {
+            for(let j=options.uniquePairs?i+1:options.mirrors?i:i+1;j<options.roster.length;j++) {
                 if(i===j) matches.push([options.roster[i],options.roster[i]]);
+                else if(options.uniquePairs) matches.push([options.roster[i],options.roster[j]]);
                 else matches.push([options.roster[i],options.roster[j]],[options.roster[j],options.roster[i]]);
             }
         }
@@ -457,13 +479,14 @@ function startParallelRoundRobin(options) {
     matches.forEach((pair,index)=>lanePairs[index%2].push(pair));
     const previousBatches=stats.roundRobin?.completedBatches ?? 0;
     current={...options,kind:'roundRobin',simulate:false,parallel:true,matches:0,totalMatches:matches.length,
-        previousBatches,laneDone:[false,false],laneMatches:[0,0],laneReports:[null,null],frames:[]};
+        previousBatches,laneDone:[false,false],laneMatches:[0,0],laneSkipped:[0,0],laneReports:[null,null],frames:[]};
     if(stats.roundRobinLatest?.run) stats.roundRobinLatest.run.lanes=lanePairs.map((pairs,index)=>({
-        lane:index+1,expectedMatches:pairs.length,completedMatches:0,status:'starting'
+        lane:index+1,expectedMatches:pairs.length,completedMatches:0,skippedMatches:0,status:'starting'
     }));
     beginMemoryProbe();
     const box=document.createElement('aside');box.className='tournament-status tournament-parallel';
-    const status=document.createElement('span');status.textContent='Preparando los dos combates…';
+    const status=document.createElement('span');status.textContent=options.uniquePairs?
+        'Preparando cruces únicos en dos pantallas…':'Preparando los dos combates…';
     const stop=button('Detener',()=>{
         if(!current?.parallel)return;
         current.stopRequested=true;status.textContent='Deteniendo ambos combates…';
@@ -475,9 +498,11 @@ function startParallelRoundRobin(options) {
         const title=document.createElement('strong');title.textContent='Combate '+(index+1)+' · 0/'+pairs.length;
         const frame=document.createElement('iframe');frame.title='Simulación de combate '+(index+1);
         frame.src='simulation-lane.html?simulationLane&lane='+index;
+        const skip=button('Omitir combate',()=>frame.contentWindow?.postMessage({type:'svmm-simulation-skip-combat',laneId:index},location.origin));
+        skip.disabled=true;
         frame.addEventListener('error',()=>onLaneFinished(index,null,0),{once:true});
-        panel.append(title,frame);lanes.append(panel);
-        return {frame,title,pairs};
+        panel.append(title,frame,skip);lanes.append(panel);
+        return {frame,title,pairs,skip};
     });
     current.frames=frames.map(entry=>entry.frame);current.status=status;
     box.append(status,stop,lanes);document.body.append(box);overlay={box,status,next:{hidden:true},bracket:{textContent:''}};
@@ -555,7 +580,9 @@ function startParallelRoundRobin(options) {
         current.matches=current.laneMatches.reduce((a,b)=>a+b,0);
         const measurement=finishMemoryProbe();
         stats.lastSimulationMemory={concurrency:2,matches:current.matches,measurement};
-        if(latest.run) Object.assign(latest.run,{completedMatches:current.matches,status:completedAll?'complete':'interrupted',
+        if(latest.run) Object.assign(latest.run,{completedMatches:current.matches,
+            skippedMatches:current.laneSkipped.reduce((sum,count)=>sum+count,0),
+            status:completedAll?'complete':'interrupted',
             finishedAt:new Date().toISOString(),memory:measurement,
             ...(!completedAll&&stats.lastSimulationError?{error:stats.lastSimulationError}:{})});
         if(measurement?.averageMB!=null) {
@@ -575,16 +602,25 @@ function startParallelRoundRobin(options) {
             const entry=frames[data.laneId];
             if(!entry||event.source!==entry.frame.contentWindow||current.laneDone[data.laneId])return;
             entry.frame.contentWindow.postMessage({type:'svmm-simulation-start',laneId:data.laneId,
-                roster:options.roster,lanePairs:entry.pairs},location.origin);
+                roster:options.roster,lanePairs:entry.pairs,unlimitedTime:options.unlimitedTime,
+                uniquePairs:options.uniquePairs},location.origin);
         } else if(data?.type==='svmm-simulation-progress') {
             const lane=data.laneId;if(!Number.isInteger(lane)||!frames[lane]||event.source!==frames[lane].frame.contentWindow)return;
             current.laneMatches[lane]=Math.max(current.laneMatches[lane],data.matches);
+            if(data.skipped) {
+                current.laneSkipped[lane]=(current.laneSkipped[lane]??0)+1;
+                const laneRun=stats.roundRobinLatest?.run?.lanes?.[lane];
+                if(stats.roundRobinLatest?.run) stats.roundRobinLatest.run.skippedMatches++;
+                if(laneRun)laneRun.skippedMatches=(laneRun.skippedMatches??0)+1;
+            }
             const laneRun=stats.roundRobinLatest?.run?.lanes?.[lane];
             if(laneRun) Object.assign(laneRun,{completedMatches:current.laneMatches[lane],status:'running'});
             armLaneWatchdog();
             frames[lane].title.textContent='Combate '+(lane+1)+' · '+data.matches+'/'+data.total;
+            frames[lane].skip.disabled=false;
             status.textContent='Progreso: '+current.laneMatches.reduce((a,b)=>a+b,0)+'/'+current.totalMatches+
-                ' · 2 combates simultáneos';
+                (options.uniquePairs?' cruces únicos':' combates')+' · 2 simultáneos'+
+                (current.laneSkipped.reduce((sum,count)=>sum+count,0)?' · '+current.laneSkipped.reduce((sum,count)=>sum+count,0)+' omitidos':'');
         } else if(data?.type==='svmm-simulation-combat-state') {
             const lane=data.laneId;
             if(!Number.isInteger(lane)||!frames[lane]||event.source!==frames[lane].frame.contentWindow)return;
@@ -592,8 +628,10 @@ function startParallelRoundRobin(options) {
             if(laneRun) {
                 laneRun.currentCombat=data.state==='in-progress'
                     ?{status:'en curso',blue:data.blue,red:data.red,match:data.match}
+                    :data.state==='skipped'?{status:'omitido',blue:data.blue,red:data.red,match:data.match}
                     :{status:'terminado',blue:data.blue,red:data.red,match:data.match,winner:data.winner,reason:data.reason};
             }
+            frames[lane].skip.disabled=data.state!=='in-progress';
             persist();
         } else if(data?.type==='svmm-simulation-lane-finished') {
             if(!Number.isInteger(data.laneId)||!frames[data.laneId]||event.source!==frames[data.laneId].frame.contentWindow)return;
@@ -794,6 +832,22 @@ function openRoundRobinMenu() {
         d.close();
         startTournament({kind:'roundRobin',roster,mirrors:mirrors.value==='yes',
             total:Number(repeat.value),teamSize:1,simulate:true,concurrency:Number(concurrency.value)});
+    }),button('Una vez por pareja · 2 pantallas',()=>{
+        const roster=size.value==='all'?pool:checked.filter(item=>item.input.checked).map(item=>item.id);
+        if(size.value!=='all' && roster.length!==Number(size.value)) {
+            msg.textContent='Selecciona exactamente '+size.value+' luchadores.';
+            return;
+        }
+        const reportedRam=Number(navigator.deviceMemory);
+        const heap=performance.memory;
+        const lowHeadroom=heap&&Number.isFinite(heap.jsHeapSizeLimit)&&heap.jsHeapSizeLimit-heap.usedJSHeapSize<256*1024*1024;
+        if((Number.isFinite(reportedRam)&&reportedRam<=4)||lowHeadroom) {
+            msg.textContent='Para cuidar la memoria, el navegador reporta poca capacidad disponible; usa “Simular cruces” con 1 combate.';
+            return;
+        }
+        d.close();
+        startTournament({kind:'roundRobin',roster,uniquePairs:true,unlimitedTime:true,total:1,
+            teamSize:1,simulate:true,concurrency:2});
     }),button('Volver',()=>{d.close();openTournamentMenu();}));
     d.showModal();
 }

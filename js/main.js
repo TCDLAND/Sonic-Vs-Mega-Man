@@ -27,7 +27,7 @@ import { switchTeamFighter } from './battle.js?v=team3-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';
 import { dealDamage, DEBUG_COMBAT } from './combat-system.js';
-import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, startTournament, cancelTournament, tournamentRunning } from './tournament.js?v=round-robin-snapshots-1';
+import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, startTournament, cancelTournament, tournamentRunning, skipCurrentSimulationCombat } from './tournament.js?v=round-robin-unique-pairs-1';
 import { HIGHWAY_WALLS, landOnStagePlatform } from './wall-system.js';
 import { checkSonicDashAttack, checkSonicRocketAttack } from './sonic.js';
 import {
@@ -738,7 +738,11 @@ if(new URLSearchParams(location.search).has('simulationLane')) {
         if(event.source!==window.parent||event.origin!==location.origin)return;
         if(event.data?.type==='svmm-simulation-start'&&!tournamentRunning()) {
             startTournament({kind:'roundRobin',roster:event.data.roster,lanePairs:event.data.lanePairs,
-                laneId:event.data.laneId,total:1,teamSize:1,simulate:true});
+                laneId:event.data.laneId,total:1,teamSize:1,simulate:true,concurrency:2,
+                uniquePairs:Boolean(event.data.uniquePairs),unlimitedTime:Boolean(event.data.unlimitedTime)});
+        } else if(event.data?.type==='svmm-simulation-skip-combat'&&
+            event.data.laneId===Number(new URLSearchParams(location.search).get('lane'))) {
+            skipCurrentSimulationCombat();
         } else if(event.data?.type==='svmm-simulation-stop'&&tournamentRunning()) cancelTournament();
     });
     window.addEventListener('load',()=>window.parent.postMessage({

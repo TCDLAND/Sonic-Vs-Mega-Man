@@ -238,6 +238,8 @@ canvas {
 .simulation-lanes { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 10px; }
 .simulation-lane { min-width: 0; padding: 6px; background: #10192a; border: 1px solid #526b8e; border-radius: 6px; }
 .simulation-lane strong { display: block; margin: 0 0 5px; font: 12px system-ui; color: #c9e2ff; }
+.simulation-lane > button { margin: 6px 0 0; min-height: 30px; }
+.simulation-lane > button:disabled { opacity: .55; cursor: default; }
 .simulation-lane iframe { display: block; width: 100%; aspect-ratio: 16/9; border: 0; background: #000; }
 body.simulation-lane { display: block; width: 100vw; height: 100vh; background: #000; }
 body.simulation-lane > #gameCanvas { width: 100vw; height: 100vh; max-height: none; aspect-ratio: 16/9; }
