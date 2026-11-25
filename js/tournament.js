@@ -221,6 +221,10 @@ function launch([first,second],swap=false) {
     } else music.play(game.battleStage.track);
     current.matchAt=combatNow();
     showStatus();
+    if(IS_SIMULATION_LANE&&window.parent!==window) window.parent.postMessage({
+        type:'svmm-simulation-combat-state',laneId:current.laneId,state:'in-progress',
+        blue:keyOf(pair[0]),red:keyOf(pair[1]),match:current.matches+1
+    },location.origin);
 }
 function advance() {
     if(!current || current.activePair)return;
@@ -254,6 +258,10 @@ export function tournamentResult(winner,reason) {
     const pair=current.activePair;
     record(...pair,winner,reason);
     current.matches++;
+    if(IS_SIMULATION_LANE&&window.parent!==window) window.parent.postMessage({
+        type:'svmm-simulation-combat-state',laneId:current.laneId,state:'finished',
+        blue:keyOf(pair[0]),red:keyOf(pair[1]),match:current.matches,winner,reason
+    },location.origin);
     if (current.kind==='roundRobin') {
         if (IS_SIMULATION_LANE && window.parent !== window) {
             window.parent.postMessage({type:'svmm-simulation-progress',laneId:current.laneId,
@@ -575,6 +583,16 @@ function startParallelRoundRobin(options) {
             frames[lane].title.textContent='Combate '+(lane+1)+' · '+data.matches+'/'+data.total;
             status.textContent='Progreso: '+current.laneMatches.reduce((a,b)=>a+b,0)+'/'+current.totalMatches+
                 ' · 2 combates simultáneos';
+        } else if(data?.type==='svmm-simulation-combat-state') {
+            const lane=data.laneId;
+            if(!Number.isInteger(lane)||!frames[lane]||event.source!==frames[lane].frame.contentWindow)return;
+            const laneRun=stats.roundRobinLatest?.run?.lanes?.[lane];
+            if(laneRun) {
+                laneRun.currentCombat=data.state==='in-progress'
+                    ?{status:'en curso',blue:data.blue,red:data.red,match:data.match}
+                    :{status:'terminado',blue:data.blue,red:data.red,match:data.match,winner:data.winner,reason:data.reason};
+            }
+            persist();
         } else if(data?.type==='svmm-simulation-lane-finished') {
             if(!Number.isInteger(data.laneId)||!frames[data.laneId]||event.source!==frames[data.laneId].frame.contentWindow)return;
             onLaneFinished(data.laneId,data.report,data.matches,data.error);
