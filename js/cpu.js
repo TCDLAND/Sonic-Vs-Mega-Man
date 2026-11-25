@@ -21,7 +21,7 @@ const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
 function defaultProfile() {
     return {
-        scores: { approach: 0, guard: 0, jab: 0, heavy: 0, kick: 0, spin: 0, chaos: 0, magic: 0, roam: 0, teleport: 0, bass_shot: 0, bass_diagonal: 0, treble: 0, treble_bison: 0, knuckles_miner: 0, knuckles_grab: 0, rock_concrete: 0, rock_fire: 0, buster: 0, brake: 0, sonic_rocket: 0 },
+        scores: { approach: 0, guard: 0, jab: 0, heavy: 0, kick: 0, spin: 0, chaos: 0, magic: 0, roam: 0, teleport: 0, bass_shot: 0, bass_diagonal: 0, treble: 0, treble_bison: 0, knuckles_miner: 0, knuckles_grab: 0, rock_concrete: 0, rock_cutter: 0, rock_claw: 0, rock_fire: 0, buster: 0, brake: 0, sonic_rocket: 0 },
         wins: 0, losses: 0, draws: 0, hits: 0, blocks: 0, matches: 0, penalties: 0
     };
 }
@@ -290,6 +290,65 @@ export class CpuFighter {
                     : distance < 780 && cpu.startGreen(this.random() < .25 ? 'bomb' : 'snake');
             } else if (distance < 130) used = cpu.startEmerlMove('punch');
             if (used) { wait(780); return true; }
+        }
+        if (cpu.characterId === 'rock' && player.characterId === 'wily') {
+            const master=player.robotId||'cut';
+            const dir=towardRight?1:-1;
+            const airborne=!player.isGrounded;
+            const attack=(started,name,cooldown)=>{
+                if(!started)return false;
+                this.recordAction(name);wait(cooldown);return true;
+            };
+            if (now < this.characterCooldownUntil) {
+                const preferred=master==='guts'?330:master==='heat'?245:195;
+                const advance=distance>preferred+80,retreat=distance<preferred-75;
+                this.setMovement(cpu,advance&&dir<0||retreat&&dir>0,advance&&dir>0||retreat&&dir<0,
+                    false,cpu.isGrounded&&hasIncomingProjectile(player,cpu)&&this.random()<.16);
+                return true;
+            }
+            if (cpu.isBusy()) return true;
+            let used=false;
+            if (master==='cut') {
+                if (distance<125 && cpu.isGrounded) {
+                    if(cpu.weaponSet!=='fire')cpu.selectWeaponSet('fire');
+                    used=attack(airborne?cpu.startFlameSword():cpu.startSlashClaw(),
+                        airborne?'rock_fire':'rock_claw',airborne?1450:620);
+                } else if(distance<365&&cpu.weaponAmmo?.cut_concrete>10) {
+                    if(cpu.weaponSet!=='cut_concrete')cpu.selectWeaponSet('cut_concrete');
+                    used=attack(cpu.startRollingCutter(airborne?'upper':'lower'),'rock_cutter',920);
+                } else if(distance<820&&cpu.weaponAmmo?.fire>2) {
+                    if(cpu.weaponSet!=='fire')cpu.selectWeaponSet('fire');
+                    used=attack(cpu.startFireShot(),'rock_fire',520);
+                }
+            } else if (master==='guts') {
+                if(distance<155&&cpu.isGrounded) {
+                    if(cpu.weaponSet!=='fire')cpu.selectWeaponSet('fire');
+                    used=attack(cpu.startFlameSword(),'rock_fire',1450);
+                    if(!used)used=attack(cpu.startSlashClaw(),'rock_claw',620);
+                } else if(distance<390&&cpu.weaponAmmo?.fire>=14&&this.random()<.42) {
+                    if(cpu.weaponSet!=='fire')cpu.selectWeaponSet('fire');
+                    used=attack(cpu.startHeatFire(),'rock_fire',1550);
+                } else if(distance<850&&cpu.weaponAmmo?.fire>2) {
+                    if(cpu.weaponSet!=='fire')cpu.selectWeaponSet('fire');
+                    used=attack(cpu.startFireShot(),'rock_fire',540);
+                }
+            } else {
+                if(distance<145&&cpu.isGrounded) {
+                    used=attack(cpu.startSlashClaw(),'rock_claw',620);
+                } else if(distance<440&&cpu.weaponAmmo?.cut_concrete>10) {
+                    if(cpu.weaponSet!=='cut_concrete')cpu.selectWeaponSet('cut_concrete');
+                    used=attack(cpu.startRollingCutter(airborne?'upper':'lower'),'rock_cutter',920);
+                } else if(distance<800&&cpu.weaponAmmo?.leaf_snake>=8) {
+                    if(cpu.weaponSet!=='leaf_snake')cpu.selectWeaponSet('leaf_snake');
+                    used=attack(cpu.startGreen('snake'),'rock_fire',1150);
+                }
+            }
+            if(used){this.setMovement(cpu,false,false,false);return true;}
+            const preferred=master==='guts'?330:master==='heat'?245:195;
+            const advance=distance>preferred+80,retreat=distance<preferred-75;
+            this.setMovement(cpu,advance&&dir<0||retreat&&dir>0,advance&&dir>0||retreat&&dir<0,
+                false,cpu.isGrounded&&distance>preferred+220&&this.random()<.035);
+            return true;
         }
         if (cpu.characterId === 'rock') {
             if (player.characterId === 'rock') {
