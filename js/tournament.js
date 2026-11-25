@@ -447,6 +447,9 @@ function startParallelRoundRobin(options) {
     const previousBatches=stats.roundRobin?.completedBatches ?? 0;
     current={...options,kind:'roundRobin',simulate:false,parallel:true,matches:0,totalMatches:matches.length,
         previousBatches,laneDone:[false,false],laneMatches:[0,0],laneReports:[null,null],frames:[]};
+    if(stats.roundRobinLatest?.run) stats.roundRobinLatest.run.lanes=lanePairs.map((pairs,index)=>({
+        lane:index+1,expectedMatches:pairs.length,completedMatches:0,status:'starting'
+    }));
     beginMemoryProbe();
     const box=document.createElement('aside');box.className='tournament-status tournament-parallel';
     const status=document.createElement('span');status.textContent='Preparando los dos combates…';
@@ -494,9 +497,12 @@ function startParallelRoundRobin(options) {
 
     function onLaneFinished(index,report,matchesDone) {
         if(!current?.parallel || current.laneDone[index])return;
+        const lane=stats.roundRobinLatest?.run?.lanes?.[index];
+        if(lane) Object.assign(lane,{completedMatches:matchesDone,status:report?'complete':'closed-without-report'});
         if(!report && !stats.lastSimulationError) {
             stats.lastSimulationError={format:'roundRobin',failedLane:index+1,completedMatches:matchesDone,
-                message:'Un carril terminó sin entregar su informe de resultados.'};
+                cause:'iframe-closed-without-report',
+                message:'El carril '+(index+1)+' se cerró sin entregar su informe. El navegador pudo reiniciar el iframe por recursos, o el documento pudo fallar.'};
             if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
                 completedMatches:current.laneMatches.reduce((sum,count)=>sum+count,0),status:'interrupted',
                 finishedAt:new Date().toISOString(),error:stats.lastSimulationError
@@ -549,6 +555,8 @@ function startParallelRoundRobin(options) {
         } else if(data?.type==='svmm-simulation-progress') {
             const lane=data.laneId;if(!Number.isInteger(lane)||!frames[lane]||event.source!==frames[lane].frame.contentWindow)return;
             current.laneMatches[lane]=Math.max(current.laneMatches[lane],data.matches);
+            const laneRun=stats.roundRobinLatest?.run?.lanes?.[lane];
+            if(laneRun) Object.assign(laneRun,{completedMatches:current.laneMatches[lane],status:'running'});
             armLaneWatchdog();
             frames[lane].title.textContent='Combate '+(lane+1)+' · '+data.matches+'/'+data.total;
             status.textContent='Progreso: '+current.laneMatches.reduce((a,b)=>a+b,0)+'/'+current.totalMatches+
