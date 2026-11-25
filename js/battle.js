@@ -1,5 +1,6 @@
 import { DEFAULT_ROUND_SECONDS, normalizeRoundSeconds } from './battle-stages.js';
 import { resetTeamAssists } from './team-assists.js';
+import { resetEggmanSupports } from './eggman-supports.js';
 import { resetWind } from './wind-effects.js';
 import { music } from './music.js';
 import { StoryRobot } from './story-robot.js';
@@ -130,6 +131,7 @@ export function startBattle(storyMatch) {
     const floor=setArenaGeometry(game.mode==='story'?null:game.battleStage);
     resetWind();
     resetTeamAssists();
+    resetEggmanSupports();
     game.eggAssists = {};
     game.eggAssistReady = {};
     game.silverAssist = {};

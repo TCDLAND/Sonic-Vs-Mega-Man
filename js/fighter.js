@@ -29,7 +29,7 @@ export class Fighter {
         this.speed = 6;
         this.dashSpeed = this.speed * 4;
         this.gravity = 0.6;
-        this.jumpForce = -14;
+        this.jumpForce = -16;
         this.isGrounded = true;
 
         this.controls = controls;
@@ -123,7 +123,6 @@ export class Fighter {
         this.health = MAX_HEALTH;
         this.maxPower = 100;
         this.power = 0;
-        this.meterApproachCarry = 0;
         this.defenseMultiplier = 1;
         this.characterId = 'fighter';
         this.wallSliding = false;
@@ -402,19 +401,6 @@ export class Fighter {
         const backPressed = this.keys[backKey];
 
         const hitstunned = this.isHitstunned();
-        const centerX = this.x + this.width / 2;
-        const approachDir = Math.sign(opponentX - centerX);
-        const walkingToward = this.isGrounded && approachDir !== 0 &&
-            this.keys[approachDir > 0 ? this.controls.right : this.controls.left] &&
-            !hitstunned && !this.isAttacking() && !this.isDashing && !this.isSpinDashActive &&
-            !this.isSpinning && !this.isGuarding && !this.isVulnerable && !this.wasInAirFromKnockback;
-        if (walkingToward) {
-            this.meterApproachCarry += 1;
-            if (this.meterApproachCarry >= 24) {
-                this.addPower(1);
-                this.meterApproachCarry = 0;
-            }
-        } else this.meterApproachCarry = 0;
         if (!hitstunned && !this.isAttacking() && !this.isSpinDashActive && !this.isSpinning && this.isGrounded && !this.isVulnerable && !this.wasInAirFromKnockback && combatNow() >= (this.guardBrokenUntil || 0)) {
             if (backPressed) {
                 this.isGuarding = true;
@@ -455,34 +441,53 @@ export class Fighter {
 
         if (this.isHeavyActive) {
             this.vx = 0;
-            this.heavyTimer++;
-            if (this.heavyExtendWindow > 0) this.heavyExtendWindow--;
-
-            const durations = [0, 8, 8, 8, 14];
-            const dur = durations[this.heavyFrame] || 8;
-
-            if (this.heavyTimer >= dur) {
-                this.heavyTimer = 0;
-                this.heavyHitDone = false;
-
-                if (this.heavyFrame === 1) this.heavyFrame = 2;
-                else if (this.heavyFrame === 2) {
-                    if (this.heavyCanExtend) {
-                        this.heavyExtendWindow = 20;
-                        this.heavyTimer = 0;
-                    } else {
-                        this.isHeavyActive = false;
-                        this.heavyFrame = 0;
-                    }
-                }
-                else if (this.heavyFrame === 3) {
-                    if (this.heavyCanExtend) this.heavyExtendWindow = 20;
-                    else { this.isHeavyActive = false; this.heavyFrame = 0; }
-                }
-                else if (this.heavyFrame === 4) {
+            if (this.heavyExtendWindow > 0) {
+                this.heavyExtendWindow--;
+                if (this.heavyExtendWindow === 0 && this.heavyCanExtend &&
+                    (this.heavyFrame === 2 || this.heavyFrame === 3)) {
+                    // Hold the hit pose for one short follow-up window. If the
+                    // player does not press again, finish instead of looping
+                    // this damage frame indefinitely.
                     this.isHeavyActive = false;
                     this.heavyFrame = 0;
-                    this.heavyCooldown = 30;
+                    this.heavyTimer = 0;
+                    this.heavyHitDone = false;
+                    this.heavyCanExtend = false;
+                }
+            }
+
+            if (this.isHeavyActive) {
+                const waitingForFollowUp = this.heavyCanExtend && this.heavyExtendWindow > 0 &&
+                    (this.heavyFrame === 2 || this.heavyFrame === 3);
+                if (waitingForFollowUp) {
+                    this.heavyTimer = 0;
+                } else {
+                    this.heavyTimer++;
+                    const durations = [0, 8, 8, 8, 14];
+                    const dur = durations[this.heavyFrame] || 8;
+
+                    if (this.heavyTimer >= dur) {
+                        this.heavyTimer = 0;
+                        if (this.heavyFrame === 1) {
+                            this.heavyFrame = 2;
+                            this.heavyHitDone = false;
+                        } else if (this.heavyFrame === 2 || this.heavyFrame === 3) {
+                            if (this.heavyCanExtend) {
+                                this.heavyExtendWindow = 20;
+                            } else {
+                                this.isHeavyActive = false;
+                                this.heavyFrame = 0;
+                                this.heavyHitDone = false;
+                                this.heavyCanExtend = false;
+                            }
+                        } else if (this.heavyFrame === 4) {
+                            this.isHeavyActive = false;
+                            this.heavyFrame = 0;
+                            this.heavyHitDone = false;
+                            this.heavyCanExtend = false;
+                            this.heavyCooldown = 30;
+                        }
+                    }
                 }
             }
         }
@@ -611,6 +616,7 @@ export class Fighter {
             }
         }
 
+        let walkingDirection = 0;
         if (this.isSpinDashActive) {
             const steering=Number(Boolean(this.keys[this.controls.right]))-Number(Boolean(this.keys[this.controls.left]));
             const braking=this.isGrounded && steering===-this.spinDirection;
@@ -643,6 +649,7 @@ export class Fighter {
 
                 this.walkReverse = isMovingAway;
                 this.vx = moveDir * this.speed;
+                if (this.isGrounded && !this.isGuarding) walkingDirection = moveDir;
             } else {
                 this.vx = 0;
                 this.walkReverse = false;
@@ -681,6 +688,7 @@ export class Fighter {
             }
         }
 
+        const beforeWalkX = this.x;
         this.x += this.vx;
 
         if (this.airMobilityLocked && this.isGrounded) this.airMobilityLocked = false;
@@ -723,6 +731,14 @@ export class Fighter {
         const stageRightWall = HIGHWAY_WALLS[1].x;
         if (this.x < stageLeftWall) this.x = stageLeftWall;
         if (this.x + this.width > stageRightWall) this.x = stageRightWall - this.width;
+        if (walkingDirection && Number.isFinite(opponentX)) {
+            const rival = this === game.p1 ? game.p2 : this === game.p2 ? game.p1 : null;
+            const targetX = rival ? rival.x + rival.width / 2 : opponentX;
+            const movement = walkingDirection * (this.x - beforeWalkX);
+            const distanceAhead = walkingDirection * (targetX - beforeWalkX - this.width / 2);
+            const approach = Math.max(0, Math.min(movement, distanceAhead));
+            if (approach > 0) this.addPower(approach * 0.04);
+        }
     }
 
     setSpinProfile(name) {

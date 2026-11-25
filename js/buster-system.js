@@ -13,19 +13,32 @@ export const BUSTER_CONFIGS = Object.freeze({
 export class BusterProjectile {
   constructor(owner, level, direction) {
     const cfg = owner.busterConfig ?? BUSTER_CONFIGS[owner.characterId];
+    direction = owner.busterDirection?.(direction) ?? direction;
     this.owner=owner; this.level=level; this.direction=direction;
+    this.spawnedAt = combatNow();
     if (owner.characterId === 'zero' || owner.characterId === 'rock') this.hitFighters = new WeakSet();
     this.basicShot = level === 1;
     this.damage=cfg.damage[level]; this.projectileForce=cfg.force[level];
     this.type=`buster-${owner.characterId}-${level}`; this.active=true;
     const sizeScale=owner.characterScale||1;
     this.width=(24 + level*10)*sizeScale; this.height=(14 + level*6)*sizeScale;
+    if (owner.characterId === 'x') {
+      const scale = owner.height / 47;
+      this.width = [0,14,23,46,68][level] * scale;
+      this.height = [0,7,15,23,43][level] * scale;
+    }
     this.x=owner.x + (direction>0 ? owner.width : -this.width);
     this.y=owner.getCurrentY() + owner.getCurrentHeight()*0.38;
-    this.vx=direction*(15 + level*2);
+    const muzzle = owner.getBusterMuzzle?.(level, direction);
+    if (muzzle) {
+      this.x = muzzle.x - (direction < 0 ? this.width : 0);
+      this.y = muzzle.y - this.height / 2;
+    }
+    this.vx=direction*(10 + level*1.5);
   }
   update(){ this.x+=this.vx; if(this.x < -100 || this.x > worldWidth+100) this.active=false; }
   draw(cameraX){
+    if (this.owner.drawBusterSprite?.(this, cameraX)) return;
     if(this.owner.characterId==='protoman'&&drawRobotShot(ctx,this.level>1?'protoCharge':'protoShot',
       this.x-cameraX,this.y,this.width,this.height,this.direction>0?0:Math.PI))return;
     const centerX=this.x-cameraX+this.width/2;

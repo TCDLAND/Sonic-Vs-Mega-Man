@@ -6,6 +6,7 @@ import { animationsFor } from './animation-catalog.js';
 import { drawRobotFrame, drawRobotShot } from './robot-sprites.js';
 import { requestSilverAssist } from './silver.js';
 import { requestEggAssist } from './eggman.js';
+import { hitEggmanSupport } from './eggman-supports.js';
 
 const cooldown=1200;
 const kit={
@@ -85,6 +86,7 @@ export function hitTeamAssist(target, attacker, rect, damage, projectile = false
     const side = target === game.p1 ? 'p1' : 'p2';
     if (game[side] !== target || !attacker || attacker === target ||
         game.teamFighters?.[side]?.includes(attacker) || !(damage > 0)) return false;
+    if (hitEggmanSupport(target,attacker,rect,damage)) return true;
     const group = [game.teamAssists,game.silverAssist,game.eggAssists].find(item=>item?.[side]);
     const assist = group?.[side];
     if (!assist || assist.active !== target) return false;

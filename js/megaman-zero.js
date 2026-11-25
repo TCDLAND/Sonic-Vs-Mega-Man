@@ -103,7 +103,7 @@ function weaponShot(owner,key,direction,shotAt,level=1){
     const shot={
         owner,active:true,basicShot:key==='bullet'&&level===1,
         type:key==='bullet'||key==='charged'?'buster-megaman-zero-'+level:'mmzero-'+key,damage:key==='bullet'&&level===2?11:spec.damage,
-        x,y,width:spec.w,height:spec.h,vx:direction*spec.v,vy:0,projectileForce:spec.force,
+        x,y,width:spec.w,height:spec.h,vx:direction*spec.v*(['bullet','charged'].includes(key) ? .72 : 1),vy:0,projectileForce:spec.force,
         hitFighters:shield?new WeakSet():null,
         update() {
             const age=combatNow()-now;
@@ -257,7 +257,8 @@ export class MegaManZero extends PrototypeFighter {
         const now=combatNow(), held=now-this.busterChargeStart;
         this.busterChargeStart=null;
         this.busterCharging=false;
-        if (!this.canAct() || this.robotMove) return;
+        if (!this.canAct() || this.robotMove || now < (this.nextBusterShotAt ?? 0)) return;
+        this.nextBusterShotAt = now + 300;
         const wall=getTouchedWall(this);
         const direction=wall?(wall.side==='left'?1:-1):target.x>=this.x?1:-1;
         const level=game.mode==='practice'||held>=1180?3:held>=480?2:1;

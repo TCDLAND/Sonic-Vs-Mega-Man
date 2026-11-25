@@ -80,7 +80,7 @@ export function checkHeavyCollision(attacker, receiver) {
         attacker.applyDamage(receiver, dmg, ["high"], knockback,attacker.characterId==='espio'?'Golpe fuerte de Espio':undefined);
         attacker.heavyHitDone = true;
 
-        if (attacker.heavyFrame === 2) attacker.heavyCanExtend = true;
+        if (attacker.heavyFrame === 2 || attacker.heavyFrame === 3) attacker.heavyCanExtend = true;
         if (attacker.heavyFrame === 4) {
             const dir = facingRight ? -1 : 1;
             attacker.vx = dir * 8;

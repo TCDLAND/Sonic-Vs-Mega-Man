@@ -161,6 +161,8 @@ export function drawCountdown() {
 
 export function drawResultScreen() {
     backdrop(game.winner === 'draw' ? 'EMPATE' : `${game.winnerName || 'GANADOR'} GANA`, game.resultReason === 'time' ? 'TIEMPO AGOTADO • VIDA TOTAL' : 'EL COMBATE HA TERMINADO');
+    const winner = game.winner === 'p1' ? game.p1 : game.winner === 'p2' ? game.p2 : null;
+    winner?.drawVictoryPose?.(W / 2, 423);
     const cpuWon = game.mode === 'cpu' && game.winner === 'p1';
     const message = game.mode === 'ai'
         ? 'Ambos rivales guardaron lo aprendido para la siguiente pelea.'

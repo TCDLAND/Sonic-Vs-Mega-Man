@@ -14,11 +14,19 @@ export const moves = {
         ['Upper Fist / Iron Crusher','M / K'], ['Bola de demolición','Q y mantén WASD para dirigir; Abajo + Q inicia el barrido bajo'], ['Órbita 360°','Espacio + Q desde reposo'], ['Bola en llamas','Durante o justo después del dash, pulsa Q'],
         ['Dash aéreo','Dirección + Espacio, también en diagonal'], ['Scrap Toss / Missile Launch','E / Hacia el rival + E'],
         ['Egg Bomb','Abajo + E'], ['Agarre Eggmobile','Arriba + M'],
-        ['Vuelo','WASD en las cuatro direcciones. Espacio sin dirección para defender'], ['Combustible','El vuelo consume combustible y subir consume más. El dash cuesta 18%. Baja al suelo para recargar'], ['Wrecking Ball Rampage / Egg Crusher Protocol','I / Abajo + I']],
+        ['Vuelo','WASD en las cuatro direcciones. Espacio sin dirección para defender'], ['Combustible','El vuelo consume combustible y subir consume más. El dash cuesta 18%. Baja al suelo para recargar'], ['Wrecking Ball Rampage / Egg Crusher Protocol','I / Abajo + I'],
+        ['Egg Pawn · arma / taladro / bomba','Arriba + I / Adelante + I / Atrás + I'],
+        ['Motobug · embestida / Buzzer · anti-aéreo','Atrás + E / Arriba + E']],
     emerl: [['Puño', 'J'], ['Patada de onda', 'I en el suelo'], ['Patada alta', 'M'], ['Patada giratoria', 'K en el suelo'], ['Patada Rocket', 'K en el aire'], ['Copia de historia · Buster', 'Mantén J y suelta'], ['Sets copiados', 'Sigue automáticamente el set de Rock durante el duelo']],
     x: [['Buster de cuatro niveles', 'Mantén J y suelta, en suelo o aire'],
-        ['Sable en suelo o en salto', 'M'], ['Salto de pared', 'Salto junto a la pared'],
-        ['Nova Strike', 'K']],
+        ['Sacar o guardar sable', 'Aux1'], ['Salto de pared', 'Salto junto a la pared'],
+        ['Nova Strike', 'K'], ['Sable / barrido', 'Con sable: M / Abajo + M'],
+        ['Combo físico / puño aéreo / puño bajo', 'Sin sable: M en cadena / M en aire / Abajo + M'],
+        ['Patada / gancho / patada baja o aérea', 'Sin sable: I / Arriba + I / Abajo + I / I en aire'],
+        ['Hadoken', 'Sin sable: Aux2 en suelo'],
+        ['Tajo de avance / tajo descendente', 'Con sable: Adelante + M en suelo / Abajo + M en aire'],
+        ['Corte ascendente / giro de 360°', 'Con sable: I en suelo / I en aire'],
+        ['Espadazo al piso', 'Con sable: Abajo + K en suelo']],
     zero: [
         ['Corte A / B / C', 'J / I / K'], ['Corte de avance', 'Adelante + J'],
         ['Corte ascendente', 'Abajo + I'], ['Corte agachado', 'Abajo + J'],
@@ -90,7 +98,10 @@ export const moves = {
     protoman: [['Buster / tiro cargado', 'Pulsa J / mantén J y suelta'],
         ['Escudo frontal', 'Mantén I mientras caminas o saltas'],
         ['Carga tras el escudo', 'Mantén I + J y suelta J para disparar'],
-        ['Golpe cercano', 'M'], ['Golpe de escudo', 'K'], ['Esquiva hacia atrás', 'Atrás + K']],
+        ['Golpe cercano', 'M'], ['Golpe de escudo', 'K'], ['Esquiva hacia atrás', 'Atrás + K'],
+        ['Lanzar escudo frontal / diagonal', 'Adelante + K / Arriba o Abajo + K'],
+        ['Lanzamiento rápido potenciado · 1 barra', 'Mantén I al lanzar / I + K frontal'],
+        ['Barrido bajo', 'Abajo + M'], ['Empuje frontal', 'I + M']],
     rock: [['Buster base', 'Mantén J y suelta'], ['Selector de armas', 'Abajo dos veces y elige dirección'],
         ['Concrete / serpiente / fuego', 'J según el kit'], ['Rolling Cutter / espada / bomba', 'M según el kit'],
         ['Beat / patrullaje', 'I / izquierda + derecha + I'], ['Rush Coil / Jet', 'K en suelo / dirección + K o K en aire'],
@@ -111,7 +122,7 @@ function clearInputs(fighter) {
 }
 
 const essentialMoves = {
-    wily:[0,2,3], eggman:[2,5,8], emerl:[1,3,4], x:[0,1,3], zero:[1,2,11],
+    wily:[0,2,3], eggman:[2,5,12,13], emerl:[1,3,4], x:[0,1,3], zero:[1,2,11],
     'megaman-zero':[1,3,4], silver:[4,6,11], chaos:[4,6,7], tails:[3,4,5],
     'metal-sonic':[4,5,9], sonic:[1,5,6], shadow:[1,2,5], knuckles:[1,2,3],
     bass:[1,5,6], protoman:[1,2,5], rock:[1,4,5], espio:[2,7,8]

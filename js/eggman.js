@@ -5,6 +5,7 @@ import { updatedCells, updatedFrame } from './fighter-update-art.js';
 import { drawRobotFrame } from './robot-sprites.js';
 import { ctx, game } from './state.js';
 import { HIGHWAY_WALLS } from './wall-system.js';
+import { startEggmanSupport } from './eggman-supports.js';
 
 const moves = {
     jab: { art:'jab', duration:420, hit:[180], damage:7, reach:105 },
@@ -118,6 +119,10 @@ export class Eggman extends Fighter {
         this.fuel=MAX_FUEL;
         this.maxFuel=MAX_FUEL;
         this.comboStep=0;
+        this.eggPawn=null;
+        this.eggPawnReadyAt=0;
+        this.eggMotobugReadyAt=0;
+        this.eggBuzzerReadyAt=0;
         configureCombatant(this,'eggman','EGGMAN');
     }
 
@@ -148,7 +153,10 @@ export class Eggman extends Fighter {
         const c=this.controls;
         const blue=c.attack==='KeyJ';
         const down=Boolean(this.keys[c.crouch]);
-        const toward=Boolean(this.keys[center(target)>center(this)?c.right:c.left]);
+        const targetRight=center(target)>center(this);
+        const toward=Boolean(this.keys[targetRight?c.right:c.left]);
+        const backward=Boolean(this.keys[targetRight?c.left:c.right]);
+        const up=Boolean(this.keys[c.jump]);
         let key;
         if (code===c.attack) {
             if (combatNow()>(this.comboUntil||0)) this.comboStep=0;
@@ -166,7 +174,13 @@ export class Eggman extends Fighter {
         }
         if (code===c.kickLight) key=this.keys[c.jump]?'grab':'upper';
         if (code===c.kickHeavy) key='crush';
-        if (code===c.heavy) key=down?'protocol':'rampage';
+        if (code===c.heavy) {
+            if(down) key='protocol';
+            else if(up){this.commandEggPawn('weapon',target);return true;}
+            else if(toward){this.commandEggPawn('drill',target);return true;}
+            else if(backward){this.commandEggPawn('bomb',target);return true;}
+            else key='rampage';
+        }
         if (code===(blue?'KeyQ':'BracketLeft')) {
             const guard=Boolean(this.keys[c.spinKey]) && combatNow()>=(this.dashChargeUntil??0);
             key=guard && !this.airDash ? 'orbit' : down ? 'low' : 'high';
@@ -176,11 +190,22 @@ export class Eggman extends Fighter {
             const vertical=Number(down)-Number(Boolean(this.keys[c.jump]));
             if (horizontal || vertical) { this.startAirDash(horizontal,vertical); return true; }
         }
-        if (code===(blue?'KeyE':'BracketRight')) key=down?'bomb':toward?'missile':'scrap';
+        if (code===(blue?'KeyE':'BracketRight')) {
+            if(up){this.summonBuzzer(target);return true;}
+            if(backward){this.summonMotobug(target);return true;}
+            key=down?'bomb':toward?'missile':'scrap';
+        }
         if (!key) return false;
         this.startMove(key,target);
         return true;
     }
+
+    commandEggPawn(order,target) {
+        return startEggmanSupport(this,'pawn',order,target);
+    }
+
+    summonMotobug(target) { return startEggmanSupport(this,'motobug',null,target); }
+    summonBuzzer(target) { return startEggmanSupport(this,'buzzer',null,target); }
 
     startAirDash(dx,dy) {
         const now=combatNow();

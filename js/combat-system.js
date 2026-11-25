@@ -106,6 +106,10 @@ function incomingSideIsGuarded(receiver, attacker, impactX) {
 
 export function dealDamage(receiver, baseDamage, options = {}) {
   const { attacker = null, attackName = 'Ataque', multiplier = 1, ignoreDefense = false } = options;
+  if (receiver.characterId === 'chaos' && options.element === 'fire') {
+    receiver.lastGuardImpact = { blocked: false, broken: false, front: false, at: combatNow() };
+    return 0;
+  }
   const interception = baseDamage > 0 && receiver.interceptIncomingHit?.(baseDamage, options);
   if (interception) {
     receiver.lastGuardImpact = { blocked: true, broken: false, front: true, shield: interception==='shield', at: combatNow() };
@@ -138,16 +142,28 @@ export function dealDamage(receiver, baseDamage, options = {}) {
   }
   const requestedGuard = ((receiver.isGuarding && receiver.guardType) || shieldGuard) && !options.ignoreGuard;
   const guarded = Boolean(requestedGuard && incomingSideIsGuarded(receiver, attacker, options.impactX));
+  const protoShield = shieldGuard && receiver.shieldMeleeCapacity;
+  if (guarded && protoShield && options.projectile) {
+    receiver.lastGuardImpact = { blocked:true, broken:false, front:true, shield:true, at:now };
+    receiver.guardFlashUntil = now + 180;
+    receiver.addPower?.(Math.min(2,raw*.13));
+    receiver.onShieldProjectileBlock?.(baseDamage,now);
+    if (baseDamage >= 16) impactWind(receiver,raw,{...options,wind:'stormFx'},true);
+    return 0;
+  }
   let guardBroken = false;
   receiver.lastGuardImpact = { blocked: false, broken: false, at: now };
   if (guarded) {
-    if (now - (receiver.guardLastHitAt || 0) > GUARD_COMBO_WINDOW_MS) receiver.guardDamage = 0;
-    receiver.guardLastHitAt = now;
-    const pressure = (receiver.guardDamage || 0) + raw;
-    receiver.guardDamage = weakBasicShot ? Math.min(pressure, GUARD_BREAK_DAMAGE - 1) : pressure;
-    if (receiver.guardDamage >= GUARD_BREAK_DAMAGE) {
+    const pressureKey = protoShield ? 'shieldMeleePressure' : 'guardDamage';
+    const timeKey = protoShield ? 'shieldMeleeHitAt' : 'guardLastHitAt';
+    const capacity = protoShield || GUARD_BREAK_DAMAGE;
+    if (now - (receiver[timeKey] || 0) > GUARD_COMBO_WINDOW_MS) receiver[pressureKey] = 0;
+    receiver[timeKey] = now;
+    const pressure = (receiver[pressureKey] || 0) + raw;
+    receiver[pressureKey] = weakBasicShot ? Math.min(pressure, capacity - 1) : pressure;
+    if (receiver[pressureKey] >= capacity) {
       guardBroken = true;
-      receiver.guardDamage = 0;
+      receiver[pressureKey] = 0;
       receiver.guardBrokenUntil = now + GUARD_BREAK_RECOVERY_MS;
       receiver.guardBreakFlashUntil = now + 560;
       receiver.guardImpactPending = false;
@@ -170,6 +186,7 @@ export function dealDamage(receiver, baseDamage, options = {}) {
       receiver.guardImpactPending = !shieldGuard;
       receiver.guardFlashUntil = now + 180;
       receiver.lastGuardImpact = { blocked: true, broken: false, at: now };
+      receiver.addPower?.(Math.min(protoShield ? 2 : 6, raw * (protoShield ? .13 : .4)));
       if (!options.guardHandled) finalDamage = Math.round(finalDamage * (shieldGuard ? 0 : options.guardMultiplier ?? 0.15) * 100) / 100;
     }
   }
@@ -205,8 +222,27 @@ export function dealDamage(receiver, baseDamage, options = {}) {
     // Los tiros básicos mantienen su daño, pero casi no alimentan el medidor.
     // Para el resto premiamos el combate activo, y damos una fracción al rival.
     const basicShot = Boolean(options.basicShot);
-    attacker?.addPower?.(finalDamage * (basicShot ? 0.025 : 0.82));
-    receiver?.addPower?.(finalDamage * (basicShot ? 0.04 : 0.38));
+    const healthLost = healthBeforeHit - receiver.health;
+    const powerGain = healthLost * (basicShot ? 0.025 : 1.05);
+    attacker?.addPower?.(powerGain);
+    receiver?.addPower?.(healthLost * (basicShot ? 0.04 : 0.45));
+    if (!receiver.lastGuardImpact?.blocked) receiver.meterCombo = null;
+    if (attacker && !basicShot && healthLost > 0 && !receiver.lastGuardImpact?.blocked) {
+      const combo = attacker.meterCombo;
+      if (!combo || combo.target !== receiver || now - combo.lastAt > 750) {
+        attacker.meterCombo = { target: receiver, lastAt: now, attacks: new Set([attackName]), power: powerGain };
+      } else {
+        combo.lastAt = now;
+        combo.attacks.add(attackName);
+        combo.power += powerGain;
+        if (combo.attacks.size >= 3 && !combo.rewarded) {
+          attacker.addPower?.(Math.max(0, 50 - combo.power));
+          combo.rewarded = true;
+        }
+      }
+    } else if (attacker) {
+      attacker.meterCombo = null;
+    }
   }
 
   if (finalDamage > 0) {

@@ -436,6 +436,22 @@ export class CpuFighter {
             if (cpu.isBusy()) return true;
             const direction=towardRight?1:-1;
             if (this.refuelEggmobile(cpu)) return true;
+            const airborne=!player.isGrounded;
+            if (now>=this.characterCooldownUntil) {
+                let supportUsed=false;
+                if (airborne && distance<620 && !game.eggBuzzer && now>=(cpu.eggBuzzerReadyAt||0)) {
+                    supportUsed=cpu.summonBuzzer(player);
+                    if(supportUsed)this.recordAction('egg_buzzer');
+                } else if (!airborne && distance>230 && distance<720 && !game.eggMotobug && now>=(cpu.eggMotobugReadyAt||0) && this.random()<.20) {
+                    supportUsed=cpu.summonMotobug(player);
+                    if(supportUsed)this.recordAction('egg_motobug');
+                } else if (!cpu.eggPawn || now>=(cpu.eggPawn.orderReadyAt||0)) {
+                    const order=distance<210?'drill':distance<510?'weapon':'bomb';
+                    supportUsed=cpu.commandEggPawn(order,player);
+                    if(supportUsed)this.recordAction('egg_pawn_'+order);
+                }
+                if(supportUsed)this.characterCooldownUntil=now+650;
+            }
             const floor=cpu.feetY-cpu.height-12;
             const targetY=Math.max(48,Math.min(floor-76,player.y+(player.height-cpu.height)*.55-56));
             const climb=cpu.y>targetY+12;
@@ -511,7 +527,9 @@ export class CpuFighter {
             wait(1100);
             return true;
         }
-        if (cpu.characterId === 'x' && distance < 140 && now >= this.characterCooldownUntil && cpu.startSaber()) {
+        if (cpu.characterId === 'x' && distance < 140 && now >= this.characterCooldownUntil &&
+            (cpu.saberDrawn ? cpu.startSaber() :
+                cpu.startPhysical(cpu.isGrounded ? 'jab' : 'airPunch'))) {
             this.recordAction('heavy');
             wait(700);
             return true;
@@ -856,10 +874,35 @@ export class CpuFighter {
             this.act('spin', cpu, now);
             return;
         }
+        if (cpu.characterId === 'protoman') {
+            const guard = !cpu.shieldThrow && now >= (cpu.guardBrokenUntil || 0) &&
+                canGuard && projectileThreat && now >= this.guardReactionAt;
+            cpu.keys[cpu.controls.heavy] = guard;
+            if (guard) {
+                this.setMovement(cpu,false,false,false);
+                return;
+            }
+            if (cpu.lastProjectileBlockAt > (this.lastProtoCounterAt ?? -Infinity) &&
+                now-cpu.lastProjectileBlockAt < 850 && cpu.canUseBuster() && distance < 950) {
+                this.lastProtoCounterAt = cpu.lastProjectileBlockAt;
+                if (distance < 120 && cpu.startRobotAction('bash')) {
+                    this.recordAction('heavy');
+                } else {
+                    const direction = towardRight ? 1 : -1;
+                    const level = cpu.busterCharging ? getBusterLevel(cpu) : 1;
+                    cpu.busterCharging = false;
+                    cpu.busterChargeStart = 0;
+                    game.projectiles.push(new BusterProjectile(cpu,level,direction));
+                    cpu.onBusterFired(level,direction);
+                    this.recordAction('buster');
+                    this.busterCooldownUntil = now+750;
+                }
+                return;
+            }
+        }
         if ((cpu.characterId === 'protoman' || cpu.rockCopyEnabled) && cpu.canUseBuster() &&
             now >= this.busterCooldownUntil &&
             (cpu.busterCharging || distance >= (cpu.rockCopyEnabled ? (cpu.weaponSet !== 'base' ? 560 : 425) : 145) && distance < 1000)) {
-            if (cpu.characterId === 'protoman') cpu.keys[cpu.controls.heavy] = projectileThreat && now >= this.guardReactionAt;
             this.setMovement(cpu, false, false, false);
             if (!cpu.busterCharging) {
                 cpu.busterCharging = true;
@@ -877,17 +920,6 @@ export class CpuFighter {
             return;
         }
         const bassFiring = player.characterId === 'bass' && player.state === 'shoot';
-        if (cpu.characterId === 'protoman') {
-            cpu.keys[cpu.controls.heavy] = canGuard && projectileThreat && now >= this.guardReactionAt;
-            if (cpu.keys[cpu.controls.heavy]) {
-                if (player.characterId === 'bass' && distance < 950 && this.chargeBusterAgainstBass(cpu, player, now)) {
-                    if (cpu.busterCharging) this.setMovement(cpu, !towardRight, towardRight, false);
-                    return;
-                }
-                this.setMovement(cpu, !towardRight, towardRight, false);
-                return;
-            }
-        }
         if (now >= this.nextDecisionAt && !cpu.isBusy?.() && !cpu.isVulnerable &&
             (!projectileThreat || now >= this.guardReactionAt)) {
             if (cpu.characterId === 'bass' && canGuard &&
@@ -1231,6 +1263,7 @@ export class CpuFighter {
     }
 
     resetMatch() {
+        this.lastProtoCounterAt = -Infinity;
         this.nextDecisionAt = 0;
         this.currentAction = 'approach';
         this.lastAction = null;

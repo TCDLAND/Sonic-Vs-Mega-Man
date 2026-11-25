@@ -12,6 +12,8 @@ export const BASS_MOVES = {
 
 export const PROTO_MOVES = {
     punch: { key: 'protoMelee', ms: 65, frames: 4, active: [1, 2], damage: 10, range: 65, top: 98 },
+    sweep: { key: 'protoLow', ms: 75, frames: 3, active: [1, 1], damage: 8, range: 76, top: 56, lowGuardOnly: true },
+    strike: { key: 'protoStrike', ms: 100, frames: 3, active: [2, 2], damage: 12, range: 93, top: 103, speed: 2 },
     bash: { key: 'protoBash', ms: 71, frames: 6, active: [2, 4], damage: 14, range: 100, top: 115, speed: 4 },
     dodge: { key: 'protoDodge', ms: 57, frames: 6, speed: -7 }
 };

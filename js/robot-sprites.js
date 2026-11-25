@@ -1,8 +1,14 @@
 import { ROBOT_FRAMES } from './robot-frames.js';
+import { PROTO_STRIP_FRAMES } from './proto-strip-frames.js';
 import { bassDash } from './assets.js';
 
 const atlas = new Image();
 atlas.src = 'assets/images/bass-proto-atlas.png';
+const protoStrips = Object.fromEntries(Object.keys(PROTO_STRIP_FRAMES).map(key => {
+    const image = new Image();
+    image.src = 'assets/images/proto-update/' + key.slice(5).toLowerCase() + '.png';
+    return [key, image];
+}));
 const shots = new Image();
 shots.src = 'assets/images/bass-proto-shots.png';
 const LEFT_FACING = new Set(['bassUpShot', 'bassPunch', 'bassAirPunch', 'protoCharge', 'protoBash', 'protoLow', 'protoDodge', 'protoMelee']);
@@ -28,12 +34,15 @@ export function drawRobotShot(ctx, key, x, y, width, height, angle) {
 }
 
 export function robotFrame(key, elapsed, frameMs, x, feet, scale, facing, loop = true) {
-    const img = key === 'bassDash' ? bassDash : atlas;
+    const strip = protoStrips[key];
+    const useStrip = strip?.complete && strip.naturalWidth > 0;
+    const img = useStrip ? strip : key === 'bassDash' ? bassDash : atlas;
     if (!img.complete || !img.naturalWidth) return null;
-    const cells = ROBOT_FRAMES[key];
+    const cells = useStrip ? PROTO_STRIP_FRAMES[key] : ROBOT_FRAMES[key];
     const tick = Math.max(0, Math.floor(elapsed / frameMs));
     const frame = loop ? tick % cells.length : Math.min(cells.length - 1, tick);
-    const [sx, sy, sw, sh, anchor] = cells[frame];
+    const [sx, sy, sw, sh, cellAnchor] = cells[frame];
+    const anchor = key==='protoIdle' ? [18,19,18,18,18][frame] : cellAnchor;
     const sourceFacesLeft = LEFT_FACING.has(key) || (key === 'protoDash' && (frame === 0 || frame === 3));
     const flipX = (facing < 0) !== sourceFacesLeft;
     const groundedBass = /^bass(Idle|Run|Retreat|Crouch|Guard|GuardImpact|Barrier|Punch|Kick|Dash|Dodge|Shot)$/.test(key);

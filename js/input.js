@@ -22,7 +22,7 @@ import { startBattle, returnToCharacterSelect, switchTeamFighter, chooseTraining
 import { BusterProjectile, getBusterLevel } from './buster-system.js';
 import { getTouchedWall } from './wall-system.js';
 import { selectionIndexAt, canRandomizeSelection, randomSelectionAt } from './selection.js';
-import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, cancelTournament } from './tournament.js?v=simultaneous-1';
+import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, cancelTournament } from './tournament.js?v=round-robin-snapshots-1';
 import { modeOptionAt, resultActionAt } from './menu-screen.js?v=online-3v3-2';
 import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
@@ -48,7 +48,7 @@ const BASIC_COMBOS = {
     knuckles: { button:'attack', hit:f=>f.kHit, next:[f=>f.startPunch2(), f=>f.startUpper()], clear:f=>{f.kAction=null;f.kHit=false;f.facingLocked=false;} },
     emerl: { button:'attack', hit:f=>Boolean(f.robotMove?.hit), next:[f=>f.startEmerlMove('upper'), f=>f.startEmerlMove('roundhouse')], clear:f=>{f.robotMove=null;} },
     rock: { button:'kickLight', hit:f=>f.slashHit, next:[f=>f.startSlashClaw(), f=>f.startSlashClaw()], clear:f=>{f.slashActive=false;f.slashHit=false;f.facingLocked=false;} },
-    x: { button:'kickLight', hit:f=>Boolean(f.saber?.hit), next:[f=>f.startSaber(), f=>f.startSaber()], clear:f=>{f.saber=null;f.facingLocked=false;} },
+    x: { button:'kickLight', hit:f=>Boolean(f.saber?.hit || f.robotMove?.hit), next:[f=>f.saberDrawn?f.startSaber():f.startPhysical('kick'), f=>f.saberDrawn?f.startSaber():f.startPhysical('heavyKick')], clear:f=>{f.saber=null;f.robotMove=null;f.facingLocked=false;} },
     zero: { button:'attack', hit:f=>f.zeroAttackHit, next:[f=>f.startSaberAttack('B'), f=>f.startSaberAttack('C')], clear:f=>{f.zeroAttack=null;f.zeroAttackHit=false;f.facingLocked=false;} },
     bass: { button:'kickLight', hit:f=>Boolean(f.robotMove?.hit), next:[f=>f.startRobotAction('punch'), f=>f.startRobotAction('kick')], clear:f=>{f.robotMove=null;} },
     protoman: { button:'kickLight', hit:f=>Boolean(f.robotMove?.hit), next:[f=>f.startRobotAction('punch'), f=>f.startRobotAction('bash')], clear:f=>{f.robotMove=null;} }
@@ -410,13 +410,42 @@ export function setupInput() {
         if (!e.repeat) for (const [proto, opponent] of [[p1, p2], [p2, p1]]) {
             if (proto.characterId !== 'protoman' || (opponent.grabConnected && !opponent.grabThrown && opponent.grabTarget === proto)) continue;
             const back = opponent.x > proto.x ? proto.controls.left : proto.controls.right;
-            if (e.code === proto.controls.kickLight) proto.startRobotAction('punch');
-            if (e.code === proto.controls.kickHeavy) proto.startRobotAction(proto.keys[back] ? 'dodge' : 'bash');
+            if (e.code === proto.controls.kickLight) {
+                const attack = proto.keys[proto.controls.crouch] ? 'sweep' : proto.keys[proto.controls.heavy] ? 'strike' : 'punch';
+                proto.startRobotAction(attack);
+            }
+            if (e.code === proto.controls.kickHeavy) {
+                const forward = opponent.x > proto.x ? proto.controls.right : proto.controls.left;
+                const powered = Boolean(proto.keys[proto.controls.heavy]);
+                if (proto.keys[proto.controls.crouch]) proto.startShieldThrow(opponent,.55,powered);
+                else if (proto.keys[proto.controls.jump]) proto.startShieldThrow(opponent,-.55,powered);
+                else if (proto.keys[forward] || powered) proto.startShieldThrow(opponent,0,powered);
+                else proto.startRobotAction(proto.keys[back] ? 'dodge' : 'bash');
+            }
         }
         if (!e.repeat) for (const fighter of [p1, p2]) {
             if (fighter.characterId !== 'x') continue;
-            if (e.code === fighter.controls.kickLight) fighter.startSaber();
-            if (e.code === fighter.controls.kickHeavy) fighter.startNova();
+            const down = fighter.keys[fighter.controls.crouch];
+            const up = fighter.keys[fighter.controls.jump];
+            const forward = fighter.facingDirection > 0 ? fighter.controls.right : fighter.controls.left;
+            if (e.code === (fighter === p1 ? 'KeyQ' : 'BracketLeft')) fighter.toggleSaber();
+            if (e.code === (fighter === p1 ? 'KeyE' : 'BracketRight')) fighter.startPhysical('hado');
+            if (e.code === fighter.controls.kickLight) {
+                if (fighter.saberDrawn) {
+                    if (fighter.isDashing || (fighter.isGrounded && fighter.keys[forward])) fighter.startSwordMove('sDashCut');
+                    else if (down && !fighter.isGrounded) fighter.startSwordMove('sDive');
+                    else fighter.startSaber(down ? 'low' : 'normal');
+                }
+                else fighter.startPhysical(!fighter.isGrounded ? 'airPunch' : down ? 'lowPunch' : 'jab');
+            }
+            if (e.code === fighter.controls.heavy) {
+                if (fighter.saberDrawn) fighter.startSwordMove(fighter.isGrounded ? 'sUpper' : 'sSpin');
+                else fighter.startPhysical(up ? 'upper' : !fighter.isGrounded ? 'airKick' : down ? 'lowKick' : 'kick');
+            }
+            if (e.code === fighter.controls.kickHeavy) {
+                if (fighter.saberDrawn && down && fighter.isGrounded) fighter.startSwordMove('sGround');
+                else fighter.startNova();
+            }
         }
 
         // ================================================================
@@ -748,15 +777,17 @@ export function setupInput() {
                     fighter.busterChargeStart=0;
                     continue;
                 }
-                if (fighter instanceof Rock && level===1 && combatNow()-(fighter.lastBasicShotAt??-Infinity)<180) {
+                if (combatNow() < (fighter.nextBusterShotAt ?? 0)) {
                     fighter.busterCharging=false;
                     fighter.busterChargeStart=0;
                     continue;
                 }
+                fighter.nextBusterShotAt = combatNow() + 300;
                 fighter.busterChargeLevel = level;
                 const direction = opponent.x > fighter.x ? 1 : -1;
-                game.projectiles.push(new BusterProjectile(fighter, level, direction));
-                if (typeof fighter.onBusterFired === 'function') fighter.onBusterFired(level, direction);
+                const shot = new BusterProjectile(fighter, level, direction);
+                game.projectiles.push(shot);
+                fighter.onBusterFired?.(level, shot.direction);
                 fighter.busterCharging = false;
                 fighter.busterChargeStart = 0;
             }

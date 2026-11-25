@@ -9,6 +9,7 @@ import { addWinDamage, beginTournamentDamage, endTournamentDamage } from './tour
 const statsKey='svmm-tournament-results-v1';
 const TURN_SECONDS=99;
 const SIM_SECONDS=28;
+const SIMULATION_STALL_TIMEOUT_MS=120000;
 const IS_SIMULATION_LANE = new URLSearchParams(location.search).has('simulationLane');
 let current, overlay;
 let memoryProbe = null;
@@ -70,6 +71,25 @@ function poolList(){return [...game.characterSelection.chars];}
 function keyOf(entry){return entry.roster.join(' + ');}
 function randomRoster(size,pool){ return shuffle(pool).slice(0,size); }
 
+function emptyRoundRobinReport() {
+    return {fighters:{},matchups:{},teams:{},recent:[],completedBatches:0,tools:{},toolUses:{},mirrors:{},endings:{},winsByEnding:{},winDamage:{}};
+}
+
+function beginRoundRobinRun(options) {
+    if(IS_SIMULATION_LANE || options.kind!=='roundRobin') return;
+    const roster=[...options.roster];
+    const rosterSize=roster.length;
+    const expectedMatches=(options.total||1)*(options.mirrors?rosterSize*rosterSize:rosterSize*(rosterSize-1));
+    stats.roundRobinLatest=emptyRoundRobinReport();
+    stats.roundRobinLatest.run={
+        roster, mirrors:Boolean(options.mirrors), repetitions:options.total||1,
+        concurrency:options.concurrency||1, expectedMatches, completedMatches:0,
+        status:'in-progress', startedAt:new Date().toISOString()
+    };
+    delete stats.lastSimulationError;
+    persist();
+}
+
 export function buildBracket(entries) {
     const size=2**Math.ceil(Math.log2(entries.length));
     const playIns=entries.length-size/2;
@@ -116,46 +136,57 @@ function record(a,b,winner,reason) {
     const report = isLab
         ? stats.roundRobin ??= {fighters:{},matchups:{},teams:{},recent:[],completedBatches:0,tools:{},mirrors:{}}
         : stats;
-    if (isLab) {
-        const endings = report.endings ??= {};
+    const reports=isLab
+        ? [report,...(!IS_SIMULATION_LANE&&stats.roundRobinLatest?[stats.roundRobinLatest]:[])]
+        : [report];
+    const tools = {p1:game.cpuAgentP1?.actionCounts ?? {},p2:game.cpuAgentP2?.actionCounts ?? {}};
+    if (isLab) damage.cpuActions = tools;
+    const tally=winner==='draw'?null:winner==='p1'?aKey:bKey;
+    for(const targetReport of reports) {
+      if (isLab) {
+        const endings = targetReport.endings ??= {};
         endings[reason]=(endings[reason]??0)+1;
-        const tools = {p1:game.cpuAgentP1?.actionCounts ?? {},p2:game.cpuAgentP2?.actionCounts ?? {}};
         for (const [side,id] of [['p1',aKey],['p2',bKey]]) {
-            const counts = report.tools[id] ??= {};
+            const counts = targetReport.tools[id] ??= {};
             for (const [action,total] of Object.entries(tools[side])) counts[action]=(counts[action]??0)+total;
-            const uses = (report.toolUses ??= {})[id] ??= {};
+            const uses = (targetReport.toolUses ??= {})[id] ??= {};
             for (const [tool,total] of Object.entries(damage[side].toolUses)) uses[tool]=(uses[tool]??0)+total;
         }
         if (aKey===bKey) {
-            const mirror=report.mirrors[aKey]??={blueWins:0,redWins:0,draws:0,lowDamage:0};
+            const mirror=targetReport.mirrors[aKey]??={blueWins:0,redWins:0,draws:0,lowDamage:0};
             mirror[winner==='draw'?'draws':winner==='p1'?'blueWins':'redWins']++;
             const totalDamage=[...damage.p1.attacks,...damage.p2.attacks].reduce((sum,hit)=>sum+hit.damage,0);
             if (reason==='time' && totalDamage<15) mirror.lowDamage++;
         }
-        damage.cpuActions = tools;
-    }
-    const tally=winner==='draw'?null:winner==='p1'?aKey:bKey;
-    const table=current.teamSize===1?report.fighters:report.teams;
-    for(const [side,id] of isLab && aKey===bKey?[]:[['p1',aKey],['p2',bKey]]) {
+      }
+      if(current.teamSize===1 && tally!==null && (reason==='ko'||reason==='time')) {
+        const endingsByFighter=targetReport.winsByEnding??={};
+        const row=endingsByFighter[tally]??={ko:0,time:0};
+        row[reason]=(row[reason]??0)+1;
+      }
+      const table=current.teamSize===1?targetReport.fighters:targetReport.teams;
+      for(const [side,id] of isLab && aKey===bKey?[]:[['p1',aKey],['p2',bKey]]) {
         const row=table[id]??={wins:0,losses:0,draws:0};
         row[tally===null?'draws':winner===side?'wins':'losses']++;
-    }
-    if(current.teamSize===1 && (!isLab || aKey!==bKey)) {
+      }
+      if(current.teamSize===1 && (!isLab || aKey!==bKey)) {
         for(const [actor,enemy,side] of [[aKey,bKey,'p1'],[bKey,aKey,'p2']]) {
-            const row=report.matchups[actor]??={};
+            const row=targetReport.matchups[actor]??={};
             const entry=row[enemy]??={wins:0,losses:0,draws:0};
             entry[tally===null?'draws':winner===side?'wins':'losses']++;
         }
-    }
-    if (damage && tally !== null && current.teamSize===1 && (!isLab || aKey!==bKey)) {
-        const byFighter = report.winDamage ??= {};
+      }
+      if (damage && tally !== null && current.teamSize===1 && (!isLab || aKey!==bKey)) {
+        const byFighter = targetReport.winDamage ??= {};
         const row = byFighter[tally] ??= {
             trackedWins: 0, winsWithoutLeadingCategory: 0, winsLedBy: {}, attacks: {}, finishingAttacks: {}
         };
         addWinDamage(row, damage[winner].attacks, damage.finishingHit);
+      }
+      targetReport.recent.push({blue:aKey,red:bKey,winner:tally,winnerSide:winner,reason,seconds:elapsed,damage});
+      if(targetReport.recent.length>(isLab?60:150))targetReport.recent.shift();
     }
-    report.recent.push({blue:aKey,red:bKey,winner:tally,winnerSide:winner,reason,seconds:elapsed,damage});
-    if(report.recent.length>(isLab?60:150))report.recent.shift();
+    if(isLab && stats.roundRobinLatest?.run) stats.roundRobinLatest.run.completedMatches++;
     persist();
 }
 function showStatus() {
@@ -230,6 +261,10 @@ export function tournamentResult(winner,reason) {
         }
         if(current.matches===current.pairs.length*current.total) {
             stats.roundRobin.completedBatches++;
+            if(!IS_SIMULATION_LANE&&stats.roundRobinLatest) {
+                stats.roundRobinLatest.completedBatches=1;
+                Object.assign(stats.roundRobinLatest.run,{completedMatches:current.matches,status:'complete',finishedAt:new Date().toISOString()});
+            }
             persist();
             finish('Todos contra todos completo');
         } else launch(current.pairs[current.matches%current.pairs.length]);
@@ -254,6 +289,12 @@ export function tournamentResult(winner,reason) {
 function finish(message) {
     const done=current;
     if (done?.simulate) {
+        if(done.kind==='roundRobin'&&stats.roundRobinLatest?.run?.status==='in-progress') {
+            const expected=done.pairs.length*done.total;
+            Object.assign(stats.roundRobinLatest.run,{completedMatches:done.matches,
+                status:done.matches>=expected?'complete':'interrupted',finishedAt:new Date().toISOString()});
+            stats.roundRobinLatest.completedBatches=done.matches>=expected?1:0;
+        }
         const measurement = finishMemoryProbe();
         stats.lastSimulationMemory = {
             concurrency: done.parallel ? 2 : 1,
@@ -268,6 +309,7 @@ function finish(message) {
             aggregate.peakMB = Math.max(aggregate.peakMB, measurement.peakMB);
             aggregate.averageMB = Math.round(aggregate.totalAverageMB / aggregate.runs * 100) / 100;
         }
+        if(stats.roundRobinLatest?.run) stats.roundRobinLatest.run.memory=measurement;
         persist();
     }
     if (IS_SIMULATION_LANE && window.parent !== window) {
@@ -284,7 +326,8 @@ function finish(message) {
     }
     if(done?.parallel) {
         window.removeEventListener('message',done.laneMessageHandler);
-        window.clearTimeout(done.startTimeout);window.clearInterval(done.memoryStatusTimer);
+        window.clearTimeout(done.startTimeout);window.clearTimeout(done.stopFallback);
+        window.clearInterval(done.memoryStatusTimer);
         current=null;
         endTournamentDamage();
         setSimulatedCombatTime(null);
@@ -329,12 +372,16 @@ export function interruptTournamentSimulation(error){
         format:current.kind, match:current.matches+1, blue, red,
         message:error instanceof Error?error.message:String(error)
     };
+    if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
+        completedMatches:current.matches,status:'interrupted',finishedAt:new Date().toISOString(),error:stats.lastSimulationError
+    });
     persist();
     finish('Simulación detenida en el combate '+(current.matches+1)+
         (blue&&red?' · '+blue+' vs. '+red:''));
 }
 export function startTournament(options) {
     if(current)return;
+    beginRoundRobinRun(options);
     if(options.kind==='roundRobin'&&options.concurrency===2&&!IS_SIMULATION_LANE) {
         startParallelRoundRobin(options);
         return;
@@ -421,29 +468,66 @@ function startParallelRoundRobin(options) {
     current.frames=frames.map(entry=>entry.frame);current.status=status;
     box.append(status,stop,lanes);document.body.append(box);overlay={box,status,next:{hidden:true},bracket:{textContent:''}};
     current.memoryStatusTimer=window.setInterval(()=>sampleTournamentMemory(performance.now()),500);
-    current.startTimeout=window.setTimeout(()=>{
-        if(!current?.parallel)return;
-        for(let i=0;i<2;i++) if(!current.laneDone[i]) {
-            current.frames[i]?.contentWindow?.postMessage({type:'svmm-simulation-stop'},location.origin);
-            onLaneFinished(i,null,0);
-        }
-    },30000);
+    function armLaneWatchdog() {
+        if(!current?.parallel || current.laneDone.every(Boolean)) return;
+        window.clearTimeout(current.startTimeout);
+        current.startTimeout=window.setTimeout(()=>{
+            if(!current?.parallel)return;
+            current.stopRequested=true;
+            const completed=current.laneMatches.reduce((sum,count)=>sum+count,0);
+            stats.lastSimulationError={format:'roundRobin',completedMatches:completed,
+                expectedMatches:current.totalMatches,
+                message:'Los carriles no reportaron avance durante 120 segundos; se detuvieron y se guardaron los combates terminados.'};
+            if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
+                completedMatches:completed,status:'interrupted',finishedAt:new Date().toISOString(),error:stats.lastSimulationError
+            });
+            persist();
+            status.textContent='Sin avance durante 120 s; deteniendo y guardando los combates terminados…';
+            for(const frame of current.frames) frame.contentWindow?.postMessage({type:'svmm-simulation-stop'},location.origin);
+            current.stopFallback=window.setTimeout(()=>{
+                if(!current?.parallel)return;
+                for(let i=0;i<2;i++) if(!current.laneDone[i])
+                    onLaneFinished(i,null,current.laneMatches[i]);
+            },5000);
+        },SIMULATION_STALL_TIMEOUT_MS);
+    }
 
     function onLaneFinished(index,report,matchesDone) {
         if(!current?.parallel || current.laneDone[index])return;
+        if(!report && !stats.lastSimulationError) {
+            stats.lastSimulationError={format:'roundRobin',failedLane:index+1,completedMatches:matchesDone,
+                message:'Un carril terminó sin entregar su informe de resultados.'};
+            if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
+                completedMatches:current.laneMatches.reduce((sum,count)=>sum+count,0),status:'interrupted',
+                finishedAt:new Date().toISOString(),error:stats.lastSimulationError
+            });
+            current.stopRequested=true;
+            for(let lane=0;lane<2;lane++) if(lane!==index&&!current.laneDone[lane])
+                current.frames[lane]?.contentWindow?.postMessage({type:'svmm-simulation-stop'},location.origin);
+            persist();
+        }
         current.laneDone[index]=true;current.laneReports[index]=report;current.laneMatches[index]=matchesDone;
         frames[index].title.textContent='Combate '+(index+1)+' · '+matchesDone+'/'+frames[index].pairs.length+
             (report?' · terminado':' · sin completar');
         if(!current.laneDone.every(Boolean))return;
-        window.clearTimeout(current.startTimeout);window.clearInterval(current.memoryStatusTimer);
+        window.clearTimeout(current.startTimeout);window.clearTimeout(current.stopFallback);
+        window.clearInterval(current.memoryStatusTimer);
         const combined=stats.roundRobin ?? {fighters:{},matchups:{},teams:{},recent:[],completedBatches:0,tools:{},mirrors:{}};
-        for(const laneReport of current.laneReports)if(laneReport)mergeObjectCounts(combined,laneReport);
+        const latest=stats.roundRobinLatest ??= emptyRoundRobinReport();
+        for(const laneReport of current.laneReports)if(laneReport) {
+            mergeObjectCounts(combined,laneReport);
+            mergeObjectCounts(latest,laneReport);
+        }
         const completedAll=current.laneMatches.reduce((sum,count)=>sum+count,0)===current.totalMatches;
         combined.completedBatches=current.previousBatches+(completedAll?1:0);
+        latest.completedBatches=completedAll?1:0;
         stats.roundRobin=combined;
         current.matches=current.laneMatches.reduce((a,b)=>a+b,0);
         const measurement=finishMemoryProbe();
         stats.lastSimulationMemory={concurrency:2,matches:current.matches,measurement};
+        if(latest.run) Object.assign(latest.run,{completedMatches:current.matches,status:completedAll?'complete':'interrupted',
+            finishedAt:new Date().toISOString(),memory:measurement,
+            ...(!completedAll&&stats.lastSimulationError?{error:stats.lastSimulationError}:{})});
         if(measurement?.averageMB!=null) {
             const aggregate=stats.simulationMemoryAggregate ??= {runs:0,samples:0,totalAverageMB:0,peakMB:0};
             aggregate.runs++;aggregate.samples+=measurement.samples;aggregate.totalAverageMB+=measurement.averageMB;
@@ -465,6 +549,7 @@ function startParallelRoundRobin(options) {
         } else if(data?.type==='svmm-simulation-progress') {
             const lane=data.laneId;if(!Number.isInteger(lane)||!frames[lane]||event.source!==frames[lane].frame.contentWindow)return;
             current.laneMatches[lane]=Math.max(current.laneMatches[lane],data.matches);
+            armLaneWatchdog();
             frames[lane].title.textContent='Combate '+(lane+1)+' · '+data.matches+'/'+data.total;
             status.textContent='Progreso: '+current.laneMatches.reduce((a,b)=>a+b,0)+'/'+current.totalMatches+
                 ' · 2 combates simultáneos';
@@ -474,11 +559,13 @@ function startParallelRoundRobin(options) {
         }
     };
     window.addEventListener('message',current.laneMessageHandler);
+    armLaneWatchdog();
 }
 
 export function tournamentStats(){
     const report = structuredClone(stats);
-    for (const row of [...Object.values(report.winDamage ?? {}),...Object.values(report.roundRobin?.winDamage ?? {})]) {
+    for (const row of [...Object.values(report.winDamage ?? {}),...Object.values(report.roundRobin?.winDamage ?? {}),
+        ...Object.values(report.roundRobinLatest?.winDamage ?? {})]) {
         row.winPercentByLeadingCategory = Object.fromEntries(Object.entries(row.winsLedBy).map(
             ([category, wins]) => [category, Math.round(1000 * wins / row.trackedWins) / 10]
         ));
@@ -508,9 +595,34 @@ function addSelect(box,label,choices) {
     select.replaceChildren(...choices.map(([key,title])=>new Option(title,key)));
     field.append(select);box.append(field);return select;
 }
+function fighterLabel(id) {
+    return ({rock:'Mega Man',protoman:'Proto Man','megaman-zero':'MM Zero',zero:'Zero',
+        x:'X',bass:'Bass',wily:'Wily',eggman:'Eggman',espio:'Espio',sonic:'Sonic',
+        shadow:'Shadow',knuckles:'Knuckles',tails:'Tails',silver:'Silver',chaos:'Chaos',
+        emerl:'Emerl','metal-sonic':'Metal Sonic'})[id] ?? id;
+}
 function showReport(message, showLab = false) {
     const d=makeDialog(message||'Resultados de la CPU');
     const data=document.createElement('pre');
+    const opponent=addSelect(d,'Cruces: consultar derrotas por rival',[]);
+    const opponentDetails=document.createElement('pre');
+    opponentDetails.className='tournament-matchup-details';
+    d.append(opponentDetails);
+    opponent.parentElement.hidden=true;
+    opponentDetails.hidden=true;
+    let activeOpponentReport=null;
+    const renderOpponentDetails=()=>{
+        if(!activeOpponentReport)return;
+        const fighter=opponent.value;
+        const matches=activeOpponentReport.matchups?.[fighter]??{};
+        const rows=Object.entries(matches).sort((a,b)=>
+            b[1].losses-a[1].losses||b[1].wins-a[1].wins||a[0].localeCompare(b[0]));
+        opponentDetails.textContent=rows.length
+            ?[`Derrotas de ${fighterLabel(fighter)} por rival`,`G / P / E = victorias / derrotas / empates`,'',
+                ...rows.map(([rival,result])=>`${fighterLabel(rival).padEnd(14)} ${result.wins} G / ${result.losses} P / ${result.draws} E`+
+                    (result.losses?` · ${fighterLabel(rival)} le ganó ${result.losses} ${result.losses===1?'vez':'veces'}`:''))].join('\n')
+            :`Aún no hay cruces guardados para ${fighterLabel(fighter)} en este reporte.`;
+    };
     const rank=(table)=>Object.entries(table).sort((a,b)=>{
         const ratio=s=>s.wins/Math.max(1,s.wins+s.losses+s.draws);
         return ratio(b[1])-ratio(a[1])||b[1].wins-a[1].wins;
@@ -518,23 +630,66 @@ function showReport(message, showLab = false) {
     const classification=table=>rank(table).map(([id,s])=>
         id.padEnd(13)+' '+s.wins+' G / '+s.losses+' P / '+s.draws+' E · '+(s.titles||0)+' títulos').join('\n')
         || 'Todavía no hay resultados en este formato.';
+    const endingClassification=report=>{
+        const rows=Object.entries(report?.winsByEnding??{}).sort((a,b)=>
+            (b[1].ko+b[1].time)-(a[1].ko+a[1].time));
+        return rows.length
+            ?['Victorias por personaje','KO / tiempo / total','',
+                ...rows.map(([id,result])=>`${fighterLabel(id).padEnd(14)} ${result.ko??0} KO / ${result.time??0} tiempo / ${(result.ko??0)+(result.time??0)} total`)].join('\n')
+            :'Este reporte aún no tiene el desglose por personaje. Se contará en las partidas que terminen después de esta actualización.';
+    };
     const match=addSelect(d,'Resultados',[
         ['','Clasificación 1v1'],['teams','Clasificación 3v3'],
-        ...(stats.roundRobin ? [['roundRobin','Todos contra todos']] : []),
+        ...(stats.roundRobinLatest ? [['roundRobinLatest','Última simulación · todos contra todos']] : []),
+        ...(stats.roundRobinLatest ? [['endingLatest','Victorias por KO/tiempo · última simulación']] : []),
+        ...(stats.roundRobin ? [['roundRobin','Historial acumulado · todos contra todos']] : []),
+        ...(stats.roundRobin ? [['endingRoundRobin','Victorias por KO/tiempo · historial acumulado']] : []),
+        ...(stats.winsByEnding ? [['endingGeneral','Victorias por KO/tiempo · historial 1v1']] : []),
         ...Object.keys(stats.matchups).sort().map(id=>[id,'Cruces · '+id])
     ]);
     match.onchange=()=>{
-        if (match.value==='roundRobin') {
-            const {fighters,mirrors,completedBatches,endings}=stats.roundRobin;
-            data.textContent=['Lotes completos: '+completedBatches,
+        if(match.value==='endingLatest'||match.value==='endingRoundRobin'||match.value==='endingGeneral') {
+            activeOpponentReport=null;
+            opponent.parentElement.hidden=true;
+            opponentDetails.hidden=true;
+            const report=match.value==='endingLatest'?stats.roundRobinLatest:
+                match.value==='endingRoundRobin'?stats.roundRobin:stats;
+            data.textContent=endingClassification(report);
+            return;
+        }
+        if (match.value==='roundRobin' || match.value==='roundRobinLatest') {
+            const isLatest=match.value==='roundRobinLatest';
+            const report=isLatest?stats.roundRobinLatest:stats.roundRobin;
+            activeOpponentReport=report;
+            const roster=report.run?.roster??Object.keys(report.fighters??{});
+            const selectedOpponent=roster.includes(opponent.value)?opponent.value:roster[0];
+            opponent.replaceChildren(...roster.map(id=>new Option(fighterLabel(id),id)));
+            if(selectedOpponent)opponent.value=selectedOpponent;
+            opponent.parentElement.hidden=roster.length===0;
+            opponentDetails.hidden=roster.length===0;
+            renderOpponentDetails();
+            const {fighters,mirrors,completedBatches,endings}=report;
+            const run=report.run;
+            data.textContent=[
+                ...(isLatest&&run?[
+                    'Estado: '+({complete:'completo','in-progress':'en curso',interrupted:'interrumpido'}[run.status]??run.status),
+                    'Roster: '+(run.roster??[]).join(', '),
+                    'Repeticiones: '+(run.repetitions??1)+' · Espejos: '+(run.mirrors?'sí':'no'),
+                    'Combates: '+(run.completedMatches??0)+'/'+(run.expectedMatches??0),''
+                ]:[]),
+                'Ejecuciones completas: '+completedBatches,
                 'Por nocaut: '+(endings?.ko??0)+' · Por tiempo: '+(endings?.time??0),classification(fighters),'',
                 'Espejos · azul / rojo / empate · por tiempo con menos de 15 PV de daño',
-                '', 'Memoria de la última simulación', JSON.stringify(stats.lastSimulationMemory?.measurement ??
+                '', 'Memoria de la última simulación', JSON.stringify(run?.memory ?? stats.lastSimulationMemory?.measurement ??
                     {available:false,reason:'Aún no hay una medición.'}),
-                ...Object.entries(mirrors).map(([id,s])=>id+' · '+s.blueWins+' / '+s.redWins+' / '+s.draws+' · '+s.lowDamage)
+                ...Object.entries(mirrors??{}).map(([id,s])=>id+' · '+s.blueWins+' / '+s.redWins+' / '+s.draws+' · '+s.lowDamage),
+                ...(isLatest&&run?.error?['','Motivo de interrupción: '+run.error.message]:[])
             ].join('\n');
             return;
         }
+        activeOpponentReport=null;
+        opponent.parentElement.hidden=true;
+        opponentDetails.hidden=true;
         if (!match.value || match.value==='teams') {
             data.textContent=classification(match.value==='teams'?stats.teams:stats.fighters);
             return;
@@ -552,7 +707,9 @@ function showReport(message, showLab = false) {
         }
         data.textContent=lines.join('\n');
     };
-    if (showLab && stats.roundRobin) match.value='roundRobin';
+    opponent.onchange=renderOpponentDetails;
+    if (showLab && stats.roundRobinLatest) match.value='roundRobinLatest';
+    else if (showLab && stats.roundRobin) match.value='roundRobin';
     match.onchange();
     d.append(data,button('Descargar resultados JSON',downloadStats),button('Cerrar',()=>d.close()));
     d.showModal();

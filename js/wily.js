@@ -55,7 +55,7 @@ export class Wily extends StoryRobot {
     this.width=width;this.height=height;this.y=feet-height;
     this.defenseMultiplier=profile.defense;
     this.speed=profile.speed;
-    this.jumpForce=id==='cut'?-19:id==='guts'?-11:-15.5;
+    this.jumpForce=id==='cut'?-19:id==='guts'?-15:-15.5;
     this.attackAt=-Infinity;
     this.windup=0;
     this.nextAttack=combatNow()+130;

@@ -689,7 +689,7 @@ export class FireEffect{
   if(now-last<(this.kind==='ground'?550: this.kind==='column'?400:1000))return;
   this.lastHit.set(target,now);
   const dmg=this.kind==='shot'?3:this.kind==='heat'?7:this.kind==='ground'?2:12;
-  dealDamage(target,dmg,{attacker:this.owner,attackName:'Rock FIRE '+this.kind,element:'fire',projectile:this.kind==='shot'||this.kind==='heat',impactX:this.x});if(!target.lastGuardImpact?.front)fireKnock(target,this.dir,this.kind==='column'?'column':this.kind==='ground'?'ground':'bullet');
+  const damage=dealDamage(target,dmg,{attacker:this.owner,attackName:'Rock FIRE '+this.kind,element:'fire',projectile:this.kind==='shot'||this.kind==='heat',impactX:this.x});if(damage>0&&!target.lastGuardImpact?.front)fireKnock(target,this.dir,this.kind==='column'?'column':this.kind==='ground'?'ground':'bullet');
   if(this.kind==='shot'||this.kind==='heat')this.active=false;
  }
  draw(){fireDrawFrame(this.getPixelBodyFrame());}
@@ -1229,7 +1229,7 @@ export class Rock extends PrototypeFighter {
   for(const c of this.concretes)c.tryHit(receiver);
   for(const fx of this.fireEffects)fx.tryHit(receiver);
   for(const b of this.bombs)b.tryHit(receiver);for(const sn of this.snakes)sn.tryHit(receiver);this.leafShield?.tryHit(receiver);
-  if(this.swordCasting&&!this.swordHit){const e=combatNow()-this.swordCastAt;if(e>=70&&e<360){const body=this._frame();const target=receiver?.getPixelBodyFrame?.(this.x+this.width/2);if(body&&target){const sword={...body,img:SWORD_FX};if(opaqueFramesOverlap(sword,target,null,1)){dealDamage(receiver,12,{attacker:this,attackName:'Flame Sword',element:'fire',impactX:this.x+this.width/2,impactY:this.y+this.height*.45});if(!receiver.lastGuardImpact?.front)fireKnock(receiver,this.facingDirection,'column');this.swordHit=true;}}}}
+  if(this.swordCasting&&!this.swordHit){const e=combatNow()-this.swordCastAt;if(e>=70&&e<360){const body=this._frame();const target=receiver?.getPixelBodyFrame?.(this.x+this.width/2);if(body&&target){const sword={...body,img:SWORD_FX};if(opaqueFramesOverlap(sword,target,null,1)){const damage=dealDamage(receiver,12,{attacker:this,attackName:'Flame Sword',element:'fire',impactX:this.x+this.width/2,impactY:this.y+this.height*.45});if(damage>0&&!receiver.lastGuardImpact?.front)fireKnock(receiver,this.facingDirection,'column');this.swordHit=true;}}}}
   if(!receiver||!this.slashActive||this.slashHit)return;
   const elapsed=combatNow()-this.slashStartedAt;if(elapsed<170||elapsed>=255)return; // frame 3 (indice 2)
   const f=this._frame();if(!f)return;

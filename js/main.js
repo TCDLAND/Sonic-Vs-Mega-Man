@@ -8,6 +8,7 @@ import { tickSonicWalk, drawMetalDialogue } from './sonic-chapter.js';
 import { music } from './music.js';
 import { tickAdventure } from './story-platform.js';
 import { drawEggAssists, updateEggAssists } from './eggman.js';
+import { drawEggmanSupports, updateEggmanSupports, hitEggmanSupport, hitEggmanSupportByProjectile } from './eggman-supports.js';
 import { drawSilverAssists, updateSilverAssists, handleSilverAssistShot } from './silver.js';
 import { drawChaosChoices } from './chaos.js';
 import { combatNow, setSimulatedCombatTime } from './combat-clock.js';
@@ -26,7 +27,7 @@ import { switchTeamFighter } from './battle.js?v=team3-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';
 import { dealDamage, DEBUG_COMBAT } from './combat-system.js';
-import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, startTournament, cancelTournament, tournamentRunning } from './tournament.js?v=simultaneous-1';
+import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, startTournament, cancelTournament, tournamentRunning } from './tournament.js?v=round-robin-snapshots-1';
 import { HIGHWAY_WALLS, landOnStagePlatform } from './wall-system.js';
 import { checkSonicDashAttack, checkSonicRocketAttack } from './sonic.js';
 import {
@@ -101,6 +102,7 @@ function updateTrebleBullets(p1, p2) {
         }
 
         const target = projectileOpponent(bullet.owner, p1, p2);
+        if (target && bullet.active && hitEggmanSupportByProjectile(bullet,target)) return;
         if (target && bullet.active && !target.handleProjectileVsEddie?.(bullet)) {
             const ry = target.getCurrentY();
             const rh = target.getCurrentHeight();
@@ -181,6 +183,7 @@ function updateTrebles(p1, p2) {
         const ch = treble.height;
 
         if (cx < tx + tw && cx + cw > tx && cy < ty + th && cy + ch > ty) {
+            if(hitEggmanSupport(target,treble.owner,{x:cx,y:cy,w:cw,h:ch},treble.state.startsWith('attack')?10:3))return;
             if (treble.state === "following") {
                 dealDamage(target, 3, { attacker: treble.owner, attackName: 'Treble contacto', impactX: treble.x });
                 treble.contactCooldown = 60;
@@ -501,12 +504,13 @@ function gameLoop(time = performance.now(), render = true) {
             checkBulletsVsProjectiles();
         }
         updateSilverAssists();
-        if (canFight && !p1.shadowFrozenBy && !p2.shadowFrozenBy) { updateEggAssists(); tickTeamAssists(); }
+        if (canFight && !p1.shadowFrozenBy && !p2.shadowFrozenBy) { updateEggAssists(); updateEggmanSupports(); tickTeamAssists(); }
         game.projectiles.forEach((proj) => {
             if (!proj.active) return;
             if (render) proj.draw(game.cameraX);
             if (proj.collisionDisabled) return;
             const target = projectileOpponent(proj.owner, p1, p2);
+            if (target?.interceptFlyingShield?.(proj)) return;
             if (target && (handleSilverAssistShot(proj,target) || interceptTeamAssist(proj,target) || target.interceptSilverShot?.(proj))) return;
             if (!target || target.handleProjectileVsEddie?.(proj) || target.handleProjectileVsConcrete?.(proj)) return;
             const targetBounds = target.getCurrentBounds?.(proj.owner.x + proj.owner.width / 2) || {x:target.x,y:target.getCurrentY(),w:target.width,h:target.getCurrentHeight()};
@@ -534,6 +538,7 @@ function gameLoop(time = performance.now(), render = true) {
             if (!bullet.active) return;
             if (render) bullet.draw(game.cameraX);
             const target = projectileOpponent(bullet.owner, p1, p2);
+            if (target?.interceptFlyingShield?.(bullet)) return;
             if (target && (handleSilverAssistShot(bullet,target) || interceptTeamAssist(bullet,target) || target.interceptSilverShot?.(bullet))) return;
             if (!target || target.handleProjectileVsEddie?.(bullet) || target.handleProjectileVsConcrete?.(bullet)) return;
             checkBassBulletCollision(bullet, target);
@@ -563,7 +568,11 @@ function gameLoop(time = performance.now(), render = true) {
         // Cualquier ataque directo bloqueado conserva el chip damage y corta su empuje.
         for (const fighter of [p1, p2]) if (fighter.guardImpactPending) {
             fighter.guardImpactPending = false;
-            fighter.vx = 0; fighter.vy = 0; fighter.isGrounded = true;
+            fighter.vx = 0;
+            if (!fighter.airGuardHeld) {
+                fighter.vy = 0;
+                fighter.isGrounded = true;
+            }
             fighter.wasInAirFromKnockback = false; fighter.knockbackAirTimer = 0;
             fighter.isVulnerable = false; fighter.vulnerableTimer = 0;
         }
@@ -604,6 +613,7 @@ function gameLoop(time = performance.now(), render = true) {
         drawTagEffects(combatNow());
         drawSilverAssists();
         drawEggAssists();
+        drawEggmanSupports();
         drawTeamAssists();
         for (const fighter of [p1,p2]) {
             const dash=fighter.isDashing || fighter.isSpinDashActive || !!fighter.airDash;
@@ -671,6 +681,7 @@ function gameLoop(time = performance.now(), render = true) {
             game.resultReason = remaining === 0 ? 'time' : 'ko';
             game.winner = emerlRetreat ? 'p1' : remaining === 0 ? (blue === red ? 'draw' : blue > red ? 'p1' : 'p2') : p1.health <= 0 && p2.health <= 0 ? 'draw' : p1.health <= 0 ? 'p2' : 'p1';
             const winner = game.winner === 'p1' ? p1 : game.winner === 'p2' ? p2 : null;
+            if (winner?.drawVictoryPose) winner.victoryAt = combatNow();
             game.winnerName = !winner ? 'EMPATE' : game.teamFighters
                 ? (game.winner === 'p1' ? 'EQUIPO AZUL' : 'EQUIPO ROJO') : winner.characterName;
             const p1Won = game.winner === 'draw' ? null : game.winner === 'p1';
