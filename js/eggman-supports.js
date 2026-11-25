@@ -152,7 +152,11 @@ class EggPawn {
     draw(now){
         if(!this.active)return;
         let sheet=supportArt.idle,list=pawnIdle,frame;
-        if(now-this.hitAt<220){sheet=supportArt.hurt;list=pawnHurt;}
+        const hurt=now-this.hitAt<220;
+        if(hurt){
+            sheet=supportArt.hurt;
+            frame=pawnHurt[Math.floor((now-this.hitAt)/55)];
+        }
         else if(this.state==='weapon'){
             const age=this.action?now-this.action.started:0;
             sheet=age<320?supportArt.gun:supportArt.shot;list=age<320?pawnGun:pawnShot;
@@ -166,12 +170,12 @@ class EggPawn {
             sheet=this.action?.grenade?supportArt.grenade:supportArt.mine;
             list=this.action?.grenade?pawnGrenade:pawnMine;
         }else if(this.vx){sheet=supportArt.run;list=pawnRun;}
-        if(this.state==='weapon'&&this.action){
+        if(!hurt&&this.state==='weapon'&&this.action){
             const age=now-this.action.started;
             if(age<320)frame=list[Math.floor(age/58)%list.length];
             else{sheet=supportArt.shot;list=pawnShot;frame=list[Math.floor((age-320)/72)%list.length];}
-        }else if(this.state==='bomb'&&this.action)frame=list[Math.floor((now-this.action.started)/68)%list.length];
-        else if(this.state!=='drill')frame=list[Math.floor(now/(this.vx?58:83))%list.length];
+        }else if(!hurt&&this.state==='bomb'&&this.action)frame=list[Math.floor((now-this.action.started)/68)%list.length];
+        frame ??= list[Math.floor(now/(this.vx?58:83))%list.length] ?? list[0];
         const [,,sw,sh]=frame, scale=this.height/sh, h=this.height,w=sw*scale;
         const x=this.x-game.cameraX+(this.width-w)/2,y=this.floorY-h;
         drawFrame(sheet,frame,x,y,w,h,this.facing<0);
