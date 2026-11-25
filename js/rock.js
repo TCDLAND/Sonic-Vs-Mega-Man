@@ -1111,7 +1111,10 @@ export class Rock extends PrototypeFighter {
   f._concretePreviousX=f.x;f._concretePreviousY=f.y;
  }
  handleProjectileVsConcrete(proj){
-  if(!proj?.active||proj.owner===this)return false;
+  // Los ataques de Wily deben poder amenazar a Rock aunque haya construido
+  // concreto delante: ese muro no puede anular todas sus opciones a distancia.
+  // La colisión normal contra el cuerpo y la guardia siguen resolviéndose después.
+  if(!proj?.active||proj.owner===this||proj.owner?.characterId==='wily')return false;
   for(const c of this.concretes){if(!c.isPlatform())continue;const r=c.platformRect;if(proj.x<r.x+r.w&&proj.x+proj.width>r.x&&proj.y<r.y+r.h&&proj.y+proj.height>r.y){const breaks=proj.type==='buster-x-4';c.takeDamage(proj.damage||3,{breaksConcrete:breaks});proj.active=false;return true;}}
   return false;
  }
