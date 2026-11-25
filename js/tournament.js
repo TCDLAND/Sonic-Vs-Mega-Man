@@ -9,7 +9,7 @@ import { addWinDamage, beginTournamentDamage, endTournamentDamage } from './tour
 const statsKey='svmm-tournament-results-v1';
 const TURN_SECONDS=99;
 const SIM_SECONDS=28;
-const SIMULATION_STALL_TIMEOUT_MS=120000;
+const SIMULATION_STALL_TIMEOUT_MS=600000;
 const IS_SIMULATION_LANE = new URLSearchParams(location.search).has('simulationLane');
 let current, overlay;
 let memoryProbe = null;

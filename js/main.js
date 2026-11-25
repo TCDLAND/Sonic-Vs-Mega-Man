@@ -715,7 +715,7 @@ function frameDriver(time) {
     sampleTournamentMemory(time);
     if (!tournamentSimulationActive()) pollXboxPads();
     if (!tournamentSimulationActive()) gameLoop(time);
-    else if (!game.paused && !tournamentSimulationPaused() && !document.hidden) {
+    else if (!game.paused && !tournamentSimulationPaused()) {
         const render=!game.quietSimulation;
         const deadline=performance.now()+(render?9:5);
         try {
