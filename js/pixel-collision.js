@@ -7,7 +7,10 @@ const cctx = cvs.getContext('2d', { willReadFrequently: true });
 
 function alphaData(frame) {
   const img = frame?.img;
-  if (!img?.complete || !img.naturalWidth || frame.sw <= 0 || frame.sh <= 0) return null;
+  if (!img || frame.sw <= 0 || frame.sh <= 0) return null;
+  const isCanvas = img instanceof HTMLCanvasElement;
+  // Las variantes de paleta se guardan como lienzos en lugar de imágenes.
+  if (isCanvas ? !img.width || !img.height : !img.complete || !img.naturalWidth) return null;
   let byImage = cache.get(img);
   if (!byImage) { byImage = new Map(); cache.set(img, byImage); }
   const key = `${frame.sx}|${frame.sy}|${frame.sw}|${frame.sh}`;
