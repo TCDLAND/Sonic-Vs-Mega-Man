@@ -379,7 +379,9 @@ export function interruptTournamentSimulation(error){
     const [blue,red]=current.activePair?.map(keyOf) ?? [];
     stats.lastSimulationError={
         format:current.kind, match:current.matches+1, blue, red,
-        message:error instanceof Error?error.message:String(error)
+        message:error instanceof Error?error.message:String(error),
+        ...(error instanceof Error&&error.stack?{stack:error.stack}:{}),
+        ...(error instanceof Error&&error.cause?{cause:String(error.cause)}:{})
     };
     if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
         completedMatches:current.matches,status:'interrupted',finishedAt:new Date().toISOString(),error:stats.lastSimulationError
