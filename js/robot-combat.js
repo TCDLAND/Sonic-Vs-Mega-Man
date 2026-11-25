@@ -65,7 +65,7 @@ export function hitRobotMove(fighter, receiver, move = fighter.robotMove) {
             rect.y < receiver.getCurrentY() + receiver.getCurrentHeight() && rect.y + rect.h > receiver.getCurrentY());
     if (!hit) return;
     move.hit = true;
-    const damage = dealDamage(receiver, spec.damage, { attacker: fighter, attackName: spec.key, element: spec.ability === 'sword' ? 'fire' : undefined, impactX: x, hitRect: rect, wind:spec.wind, ignoreGuard: spec.lowGuardOnly && receiver.guardType !== 'low' });
+    const damage = dealDamage(receiver, spec.damage, { attacker: fighter, attackName: spec.key, element: spec.ability === 'sword' ? 'fire' : undefined, impactX: x, hitRect: rect, wind:spec.wind, lowAttack:spec.lowGuardOnly, ignoreGuard: spec.lowGuardOnly && receiver.guardType !== 'low' });
     if (damage <= 0 || receiver.lastGuardImpact?.blocked || receiver.lastGuardImpact?.broken) return;
     receiver.vx = direction * 6;
     if (spec.launch) {

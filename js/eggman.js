@@ -124,6 +124,8 @@ export class Eggman extends Fighter {
         this.eggMotobugReadyAt=0;
         this.eggBuzzerReadyAt=0;
         configureCombatant(this,'eggman','EGGMAN');
+        this.maxHealth = Math.round(this.maxHealth * 1.2);
+        this.health = this.maxHealth;
     }
 
     getCurrentHeight() { return this.height; }
@@ -320,9 +322,8 @@ export class Eggman extends Fighter {
         const climb=vertical<0 && this.fuel>=1?vertical:Math.max(0,vertical);
         if (this.airDash && (interrupted || now>=this.airDash.until)) this.airDash=null;
         this.updateFuel(now,climb,floor);
-        this.isGuarding=Boolean(keys[c.spinKey] && horizontal!==toward && !this.eggMove && !this.airDash &&
-            !interrupted && now>=(this.guardBrokenUntil||0));
-        this.guardType=this.isGuarding?(vertical>0?'low':'high'):null;
+        this.isGuarding = false;
+        this.guardType = null;
         this.facingDirection=this.eggMove?.direction ?? (Math.sign(this.airDash?.vx||0) || (this.isGuarding?toward:horizontal||toward));
         this.flightDirection=this.facingDirection;
         if (interrupted) {

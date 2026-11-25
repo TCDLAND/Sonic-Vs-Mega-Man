@@ -248,23 +248,23 @@ export class CpuFighter {
                 }
                 return true;
             }
-            if (player.characterId === 'bass' && distance > 175 && distance < 720 &&
+            if (player.characterId === 'bass' && player.isAttacking() && distance > 175 && distance < 720 &&
                 now >= this.characterCooldownUntil && cpu.startMiner()) {
                 this.recordAction('knuckles_miner'); wait(1200); return true;
             }
-            if (distance > 300) { this.setMovement(cpu, toward === cpu.controls.left, toward === cpu.controls.right, false); return true; }
+            if (cpu.isGrounded && player.isGrounded && distance > 112) {
+                this.setMovement(cpu, toward === cpu.controls.left, toward === cpu.controls.right);
+                return true;
+            }
             this.setMovement(cpu, false, false, false);
             if (now < this.characterCooldownUntil) return true;
-            if (!cpu.minerPhase && cpu.isGrounded && distance > 80 && distance < 300 && this.random() < .46 && cpu.startMiner()) {
-                this.recordAction('knuckles_miner'); wait(2300); return true;
-            }
             if (cpu.isGrounded && distance < cpu.width * .88 && (player.isGuarding || this.random() < .4) && cpu.startGrab()) {
                 this.recordAction('knuckles_grab'); wait(1500); return true;
             }
             if (!player.isGrounded && distance < 220 && cpu.startUpper()) { this.recordAction('kick'); wait(1000); return true; }
             if (distance < 120 && cpu.startPunch2()) { this.recordAction('heavy'); wait(700); return true; }
             if (distance < 260 && player.isGrounded && cpu.startFloorPunch()) { this.recordAction('knuckles_miner'); wait(1200); return true; }
-            if (!cpu.isGrounded && !cpu.glide && distance < 260) cpu.startGlide(cpu.facingDirection);
+            if (!cpu.isGrounded && !cpu.glide && distance < 260) cpu.startGlide(towardRight ? 1 : -1);
             else if (cpu.glide && !cpu.glideAttack && distance < 180) cpu.attackFromGlide();
             return true;
         }
@@ -515,10 +515,9 @@ export class CpuFighter {
             const targetY=Math.max(48,Math.min(floor-76,player.y+(player.height-cpu.height)*.55-56));
             const climb=cpu.y>targetY+12;
             const descend=cpu.y<targetY-18;
-            if (!climb && !descend && now>=this.characterCooldownUntil) {
-                const move=distance<110?(now>=(cpu.eggReady?.protocol??0)?'protocol':'jab')
-                    :distance<235?(now>=(cpu.eggReady?.rampage??0)?'rampage':'low')
-                    :distance<630?'missile':null;
+            if (now>=this.characterCooldownUntil) {
+                const move=distance<165?(now>=(cpu.eggReady?.orbit??0)?'orbit':'low')
+                    :distance<630&&!climb&&!descend?'missile':null;
                 if (move && cpu.startMove(move,player)) {
                     this.setMovement(cpu,false,false,false);
                     this.recordAction('egg_'+move);
@@ -615,6 +614,27 @@ export class CpuFighter {
             }
         }
 
+        if (cpu.characterId === 'x' && now >= this.characterCooldownUntil) {
+            if (((distance < 145 && !cpu.saberDrawn) || (distance > 270 && cpu.saberDrawn))
+                && !cpu.busterCharging && cpu.toggleSaber()) {
+                wait(420);
+                return true;
+            }
+            if (cpu.saberDrawn && distance < 145 && (player.guardType === 'high' && cpu.isGrounded
+                ? cpu.startSwordMove('sGround') || cpu.startSaber('low') : cpu.startSaber())) {
+                this.recordAction('saber');
+                wait(610);
+                return true;
+            }
+        }
+        if (cpu.characterId === 'espio' && now >= this.characterCooldownUntil && distance < 280) {
+            const technique = player.guardType === 'high' && distance < 115 ? 'drill' : 'smoke';
+            if (cpu.startNinjaTechnique(technique, player)) {
+                this.recordAction('espio_' + technique);
+                wait(1050);
+                return true;
+            }
+        }
         if (cpu.characterId === 'espio' && player.characterId === 'bass' && distance > 210 &&
             distance < 850 && now >= this.characterCooldownUntil) {
             cpu.isThrowingShuriken = true;

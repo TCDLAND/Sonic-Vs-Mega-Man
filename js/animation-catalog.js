@@ -15,7 +15,7 @@ import { ROBOT_FRAMES } from './robot-frames.js';
 import { robotFrame, bassSpriteScale, BASS_IDLE_FRAME_MS } from './robot-sprites.js';
 import { SONIC_SHEETS } from './sonic.js';
 import { ROCK_SHEETS, RUSH_S, BEAT_S } from './rock.js';
-import { KNUCKLES_SHEETS } from './knuckles.js';
+import { KNUCKLES_SHEETS } from './knuckles.js?v=knuckles-moves-3';
 import { EXTRA_SHEETS, ZERO_SHEETS } from './zero.js';
 import { ZERO_TECHNIQUES } from './zero-techniques.js';
 import { ZERO_TECHNIQUE_FRAMES } from './zero-technique-frames.js';

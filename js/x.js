@@ -36,7 +36,7 @@ const swordMoves = {
     sUpper:   { ms: 55, active: [1,4], damage: 11, range: 105, top: 195, launch: -9 },
     sSpin:    { ms: 44, active: [3,8], damage: 12, range: 110, top: 144, radial: true },
     sDive:    { ms: 77, active: [1,3], damage: 12, range: 80, top: 100, band: 145 },
-    sGround:  { ms: 77, active: [2,4], damage: 14, range: 215, top: 94, band: 94 }
+    sGround:  { ms: 77, active: [2,5], damage: 28, range: 270, top: 155, band: 155, lowGuardOnly: true }
 };
 
 const framePivots = {
@@ -183,6 +183,7 @@ export class X extends PrototypeFighter {
         if (!spec || !this.saberDrawn || this.wallSliding || this.isHitstunned() ||
             (!this.isDashing && !this.canUseBuster()) || this.isAttacking() || this.isIntroActive ||
             this.isVulnerable || this.wasInAirFromKnockback) return false;
+        if (key === 'sGround' && (!this.isGrounded || !this.spendPower(100))) return false;
         this.isDashing = false;
         this.vx = 0;
         if (key === 'sDive') this.vy = Math.max(this.vy, 14);
@@ -430,6 +431,7 @@ export class X extends PrototypeFighter {
         const low = variant === 'low';
         dealDamage(receiver, low ? 9 : X_SABER[this.saber.key === 'saber' ? 'ground' : 'air'], {
             attacker: this, attackName: low ? 'Barrido de sable' : 'Sable de X',
+            lowAttack: low,
             ignoreGuard: low && receiver.guardType === 'high',
             impactX: this.x + this.width / 2
         });

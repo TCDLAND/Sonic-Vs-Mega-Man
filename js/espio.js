@@ -63,13 +63,39 @@ export class Espio extends Fighter {
         }));
     }
 
-    startNinjaTechnique(kind, target) {
+    startNinjaTechnique(kind, target, powered = false) {
         const now = combatNow();
         if (!['smoke','drill','tornado'].includes(kind) || !target || !this.isGrounded || this.isBusy() ||
             this.isHitstunned() || this.isVulnerable || now < (this.ninjaReadyAt ?? 0)) return false;
-        this.ninja = { kind, target, started: now, direction: target.x >= this.x ? 1 : -1 };
+        if (powered && (kind !== 'drill' || !this.spendPower(100))) return false;
+        this.ninja = { kind, target, powered, started: now, direction: target.x >= this.x ? 1 : -1 };
         this.ninjaReadyAt = now + 850;
         this.vx = 0;
+        return true;
+    }
+
+    isDrillDefending() {
+        const move = this.ninja;
+        if (move?.kind !== 'drill' || this.isHitstunned()) return false;
+        const age = combatNow() - move.started;
+        return age >= 145 && age < 480;
+    }
+
+    reflectDrillProjectile(shot) {
+        if (!this.ninja?.powered || !this.isDrillDefending() ||
+            !Number.isFinite(shot.vx) || (shot.vx === 0 && !shot.vy)) return false;
+        shot.owner = this;
+        shot.vx *= -2;
+        if (Number.isFinite(shot.vy)) shot.vy *= -2;
+        shot.direction = Math.sign(shot.vx) || -(shot.direction || 1);
+        shot.hitFighters?.clear();
+        return true;
+    }
+
+    startCloak() {
+        const now = combatNow();
+        if (this.isBusy() || this.isHitstunned() || now < (this.cloakUntil ?? 0) || !this.spendPower(100)) return false;
+        this.cloakUntil = now + 2000;
         return true;
     }
 
@@ -96,7 +122,7 @@ export class Espio extends Fighter {
             const fallback = side > 0 ? target.x - this.width - 24 : target.x + target.width + 24;
             this.x = Math.max(left, Math.min(right, desired < left || desired > right ? fallback : desired));
             move.direction = target.x >= this.x ? 1 : -1;
-            if (move.direction === -side) {
+            if (move.direction === -side && combatNow() >= (this.cloakUntil ?? 0)) {
                 target.smokeTurnUntil = combatNow() + 130;
                 target.smokeTurnSource = this;
             }
@@ -117,6 +143,7 @@ export class Espio extends Fighter {
         move.hit = true;
         const names = { smoke:'Corte entre humo', drill:'Trompo ninja', tornado:'Tornado ninja' };
         dealDamage(target,damage,{attacker:this,attackName:names[move.kind],impactX:this.x+this.width/2,
+            lowAttack:move.kind==='drill', ignoreGuard:move.kind==='drill' && target.guardType==='high',
             damageCategory:move.kind==='tornado'?'técnica':'cuerpo a cuerpo'});
         if (move.kind === 'tornado' && !target.lastGuardImpact?.front) {
             target.vy = -10;
@@ -126,6 +153,7 @@ export class Espio extends Fighter {
 
     draw(opponentX) {
         const now = combatNow();
+        if (now < (this.cloakUntil ?? 0)) return;
         let direction = opponentX < this.x ? -1 : 1;
         if (this.isTongueAttacking) {
             for (const cell of this.getTongueRects()) {

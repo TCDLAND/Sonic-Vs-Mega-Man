@@ -1,6 +1,6 @@
 import { drawCombatHud, tickReserveHealth } from './combat-hud.js';
 import { pollXboxPads } from './xbox-pad.js';
-import { tickAssistKeys } from './input.js?v=combo-silver-2';
+import { tickAssistKeys } from './input.js?v=knuckles-moves-3';
 import { drawTeamAssists, tickTeamAssists, interceptTeamAssist } from './team-assists.js';
 import { drawWind, emitWind } from './wind-effects.js';
 import { pollStagePad } from './battle-stages.js';
@@ -22,7 +22,7 @@ import { storyStage, showStoryResult, pollStoryPad } from './story-mode.js';
 import { bgImage, trebleSprite1, bassSprite3 } from './assets.js';
 import { drawSelectionScreen } from './selection.js';
 import { drawCountdown, drawModeScreen, drawResultScreen } from './menu-screen.js?v=online-3v3-2';
-import { setupInput } from './input.js?v=combo-silver-2';
+import { setupInput } from './input.js?v=knuckles-moves-3';
 import { switchTeamFighter } from './battle.js?v=team3-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';
@@ -112,6 +112,7 @@ function updateTrebleBullets(p1, p2) {
                 bullet.y < ry + rh &&
                 bullet.y + bullet.height > ry
             ) {
+                if (target.reflectDrillProjectile?.(bullet)) return;
                 if (bullet.charged && !target.isGuarding) {
                     bullet.effectActive = true;
                     bullet.effectTimer = 0;
@@ -523,6 +524,7 @@ function gameLoop(time = performance.now(), render = true) {
             const hitsShield = target.shieldIntersects?.(hitRect);
             if (proj.active && !proj.hitFighters?.has(target) && (hitsShield || (proj.x < targetBounds.x + targetBounds.w && proj.x + proj.width > targetBounds.x &&
                 proj.y < targetY + targetH && proj.y + proj.height > targetY && projectilePixelHit))) {
+                if (target.reflectDrillProjectile?.(proj)) return;
                 if (target.blocksProjectile?.()) { proj.active = false; return; }
                 if (target.isSpinDashActive && resolveSpinVsProjectile(target, proj)) return;
                 dealDamage(target, proj.damage, { attacker: proj.owner, attackName: proj.type || 'Proyectil', element: proj.element, basicShot: proj.basicShot, impactX: proj.x + proj.width / 2, projectile: true, hitRect });

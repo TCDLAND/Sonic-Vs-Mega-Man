@@ -92,7 +92,15 @@ export const moves = {
     shadow: [['Chop / Upper / Slider', 'J / M / K'], ['Chaos Magic / teletransporte con Rocket', 'Abajo + I / Abajo + K'], ['Freno del teletransporte', 'K otra vez antes de la patada'], ['Chaos Control / Chaos Nightmare', 'I · 2 barras'], ['Rocket', 'K en aire'], ['Super Shadow', 'Abajo dos veces · 3 barras · 30 s'],
         ['Roaming Chaos', 'Aux1'], ['Curación / Shadow Eagle', 'Abajo + Aux1 en suelo / aire'],
         ['Chaos Burst / Air Chaos Burst', 'Aux2'], ['Shadow Teleport aéreo', 'Abajo + Aux2 en aire']],
-    knuckles: [['Puño / segundo puño / upper', 'J / I / M'], ['Golpe al suelo', 'Abajo + J'], ['Agarre', 'Adelante + I'], ['Topo', 'Abajo + K'], ['Planeo / golpe en planeo', 'K en aire']],
+    knuckles: [
+        ['Puño / segundo puño / upper', 'J / I / M'], ['Golpe al suelo', 'Abajo + J'],
+        ['Guardia baja con counter', 'Abajo + I'], ['Parry, contraataque y burla', 'Atrás + M o I'],
+        ['Segundo agarre', 'Adelante + I'], ['Golpe cargado', 'Adelante + J'],
+        ['Último equidna', 'Adelante + M'], ['Megapuños (3 barras)', 'Abajo + Adelante + J'],
+        ['Puño ascendente', 'Abajo + M'], ['Cabezazo', 'Adelante + K'],
+        ['Puño con brinco', 'J en aire'], ['Burla manual', 'Atrás + J'],
+        ['Topo', 'Abajo + K'], ['Planeo / golpe en planeo', 'K en aire']
+    ],
     bass: [['Ráfaga horizontal · 8 tiros', 'J'], ['Ráfaga vertical / diagonal', 'Salto + J / Salto + dirección + J'],
         ['Llamar a Treble', 'I'], ['Puño en suelo o aire', 'M'], ['Bass Jet diagonal', 'Botón Jet'], ['Bass Jet horizontal', 'Salto + Aux1/Aux2, o en el aire dirección + Botón Jet'], ['Barrera de proyectiles', 'Abajo + M'], ['Patada ascendente', 'K'], ['Esquiva hacia atrás', 'Atrás + K']],
     protoman: [['Buster / tiro cargado', 'Pulsa J / mantén J y suelta'],
@@ -124,7 +132,7 @@ function clearInputs(fighter) {
 const essentialMoves = {
     wily:[0,2,3], eggman:[2,5,12,13], emerl:[1,3,4], x:[0,1,3], zero:[1,2,11],
     'megaman-zero':[1,3,4], silver:[4,6,11], chaos:[4,6,7], tails:[3,4,5],
-    'metal-sonic':[4,5,9], sonic:[1,5,6], shadow:[1,2,5], knuckles:[1,2,3],
+    'metal-sonic':[4,5,9], sonic:[1,5,6], shadow:[1,2,5], knuckles:[2,6,7],
     bass:[1,5,6], protoman:[1,2,5], rock:[1,4,5], espio:[2,7,8]
 };
 

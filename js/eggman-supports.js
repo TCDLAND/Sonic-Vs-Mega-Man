@@ -15,13 +15,24 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const center=f=>f.x+f.width/2;
 const overlaps=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
 
-const stripSizes={idle:[330,46],run:[454,55],shot:[314,61],gun:[585,73],drill:[605,55],blade:[412,52],mine:[120,45],grenade:[583,51],rollingMine:[163,18],hurt:[213,47],shotEffect:[353,31]};
+const stripSizes={mine:[120,45],rollingMine:[163,18],hurt:[213,47],shotEffect:[353,31]};
 const strip=(key,count)=>{
     const [width,height]=stripSizes[key],frameWidth=width/count;
     return Array.from({length:count},(_,i)=>[i*frameWidth,0,frameWidth,height]);
 };
-const pawnIdle=strip('idle',8),pawnRun=strip('run',10),pawnShot=strip('shot',5),pawnGun=strip('gun',10);
-const pawnDrill=strip('drill',10),pawnBlade=strip('blade',7),pawnMine=strip('mine',3),pawnGrenade=strip('grenade',13);
+// Cada cuadro conserva su ancla de cuerpo y la altura de los pies.
+const pawnFrames=(height, frames)=>frames.map(([left,right,body,feet])=>[left,0,right-left,height,body-left,feet]);
+const pawnIdle=pawnFrames(46, [[4,38,21,44],[42,77,59,44],[81,117,98,44],[121,159,139,44],[163,202,181,44],[206,244,225,44],[248,284,265,44],[289,324,305,44]]);
+const pawnRun=pawnFrames(55, [[9,40,23,46],[45,85,63,44],[91,138,116,46],[144,181,161,46],[190,217,203,50],[225,266,247,45],[273,320,299,46],[326,363,345,48],[374,402,388,53],[407,448,429,49]]);
+const pawnShot=pawnFrames(61, [[6,62,22,56],[66,126,82,56],[133,183,149,56],[189,250,205,56],[255,312,272,56]]);
+const pawnGun=pawnFrames(73, [[6,41,22,70],[48,87,64,70],[93,141,109,70],[147,206,163,70],[211,269,227,70],[274,324,290,70],[329,372,345,70],[380,423,396,70],[427,469,443,70],[479,518,495,70],[526,578,542,70]]);
+const pawnGrenade=pawnFrames(51, [[3,40,20,47],[46,84,63,47],[89,130,108,47],[134,175,153,47],[180,223,199,47],[229,275,249,47],[279,326,302,47],[335,365,350,47],[372,404,388,47],[412,446,428,47],[453,488,469,47],[494,530,511,47],[534,568,550,47]]);
+const pawnBlade=pawnFrames(52, [[4,70,22,42],[80,145,96,42],[152,220,167,42],[225,282,240,42],[289,333,304,42],[339,370,353,42],[379,408,394,42]]);
+const pawnDrill=pawnFrames(55, [[4,52,31,48],[59,117,98,48],[121,182,162,48],[187,257,238,48],[270,332,314,48],[341,390,373,48],[398,431,414,48],[439,470,455,48],[477,517,493,48],[526,582,551,48]]);
+const pawnMine=strip('mine',3);
+const GUN_FRAME_MS=22, SHOT_FRAME_MS=37, DRILL_FRAME_MS=28, BLADE_FRAME_MS=44, GRENADE_FRAME_MS=54;
+const SHOT_START=pawnGun.length*GUN_FRAME_MS, BLADE_START=pawnDrill.length*DRILL_FRAME_MS;
+const actionFrame=(list,age,ms)=>list[Math.min(list.length-1,Math.floor(age/ms))];
 const pawnRollingMine=strip('rollingMine',7),pawnHurt=strip('hurt',4),pawnShotEffect=strip('shotEffect',10);
 const pawnBubbles=[[14,1288,21,22],[44,1288,21,22],[74,1288,21,22],[105,1288,21,22]];
 const pawnExplosion=Array.from({length:12},(_,i)=>[i*47.8,35,47.8,45]);
@@ -62,7 +73,7 @@ class EggPawn {
         // En la hoja el Pawn ocupa casi el tamaño de un personaje completo.
         // Mantén ese tamaño en pantalla; el hitbox y la distancia de seguimiento
         // usan estas mismas dimensiones.
-        this.width=owner.height*.90;this.height=owner.height*.90;this.scale=1.12;
+        this.width=owner.height*1.08;this.height=owner.height*1.08;this.scale=1.12;
         this.facing=owner.facingDirection||1;this.x=clamp(owner.x-this.facing*(this.width+14),leftWall.x,rightWall.x-this.width);
         this.floorY=owner.feetY;this.y=this.floorY-this.height;this.vx=0;
         this.state='follow';this.action=null;this.hitAt=-Infinity;this.bubbleUntil=0;this.bubble=0;
@@ -82,7 +93,7 @@ class EggPawn {
     command(order,target){
         const now=combatNow();
         if(!this.active||now<this.orderReadyAt||this.owner.isHitstunned?.())return false;
-        this.orderReadyAt=now+2700;this.lastOrder=order;this.action={kind:order,started:now,hit:false,shots:0,target,
+        this.orderReadyAt=now+2700;this.lastOrder=order;this.action={kind:order,started:now,hit:false,target,
             grenade:order==='bomb'&&Math.abs(center(target)-center(this))>260};
         this.bubble=order==='weapon'?0:order==='drill'?1:2;this.bubbleUntil=now+880;
         this.state=order;return true;
@@ -106,14 +117,15 @@ class EggPawn {
         if(this.action){
             const a=this.action,age=now-a.started;
             if(a.kind==='weapon'){
-                if(age>=330+a.shots*210&&a.shots<3){this.fire(target);a.shots++;}
-                if(age>=850)this.action=null;
+                if(age>=SHOT_START&&!a.hit){this.fire(target);a.hit=true;}
+                if(age>=SHOT_START+pawnShot.length*SHOT_FRAME_MS)this.action=null;
             }else if(a.kind==='bomb'){
-                if(age>=420&&!a.bomb){
+                const release=a.grenade?6*GRENADE_FRAME_MS:136;
+                if(age>=release&&!a.bomb&&!a.hit){
                     const dir=Math.sign(center(target)-center(this))||this.facing;
                     a.bomb={x:center(this),y:this.floorY-13,at:now,dir,grenade:a.grenade,vy:a.grenade?-5:0};
                 }
-                if(a.bomb&&a.bomb.grenade&&age>=420&&age<1120){a.bomb.x+=a.bomb.dir*7;a.bomb.y+=a.bomb.vy;a.bomb.vy+=.32;}
+                if(a.bomb&&a.bomb.grenade&&age>=release&&age<1120){a.bomb.x+=a.bomb.dir*7;a.bomb.y+=a.bomb.vy;a.bomb.vy+=.32;}
                 const bombHit=a.bomb&&(Math.abs(center(target)-a.bomb.x)<target.width/2+22&&Math.abs(target.y+target.height*.65-a.bomb.y)<target.height*.6+30);
                 const mineHit=a.bomb&&(!a.bomb.grenade&&(Math.abs(center(target)-a.bomb.x)<target.width/2+22)||a.bomb.x<leftWall.x+12||a.bomb.x>rightWall.x-12);
                 if(a.bomb&&(bombHit||mineHit||age>=1260)&&!a.hit){
@@ -123,19 +135,22 @@ class EggPawn {
                         const dealt=dealDamage(target,12,{attacker:this.owner,attackName:'Egg Pawn Bomb',impactX:point.x,element:'fire'});
                         if(dealt>0&&!guarded){target.vx=Math.sign(center(target)-point.x||this.facing)*7;target.vy=-6;target.isGrounded=false;target.wasInAirFromKnockback=true;}
                     }
-                    boom(point.x,point.y,1.05);this.action=null;
+                    boom(point.x,point.y,1.05);a.bomb=null;
                 }
+                if(a.hit&&age>=(a.grenade?pawnGrenade.length*GRENADE_FRAME_MS:204))this.action=null;
             }else if(a.kind==='drill'){
                 const dir=center(target)>=center(this)?1:-1;this.facing=dir;
-                this.x=clamp(this.x+dir*11,leftWall.x,rightWall.x-this.width);
-                const touching=Math.abs(center(target)-center(this))<target.width/2+this.width/2&&
+                const striking=age>=BLADE_START&&age<BLADE_START+3*BLADE_FRAME_MS;
+                if(striking)this.x=clamp(this.x+dir*11,leftWall.x,rightWall.x-this.width);
+                const forward=(center(target)-center(this))*dir;
+                const touching=forward>=0&&forward<target.width/2+this.height*1.12&&
                     Math.abs((target.y+target.height*.55)-(this.y+this.height*.55))<target.height*.55+22;
-                if(touching&&!a.hit){
+                if(striking&&touching&&!a.hit){
                     a.hit=true;const guarded=target.isGuarding;
                     const dealt=dealDamage(target,11,{attacker:this.owner,attackName:'Egg Pawn Drill',impactX:center(this)});
                     if(dealt>0&&!guarded){target.vx=dir*8;target.vy=-5;target.isGrounded=false;target.wasInAirFromKnockback=true;}
                 }
-                if(age>=570){this.action=null;boom(center(this),this.y+this.height*.56,.7);}
+                if(age>=BLADE_START+pawnBlade.length*BLADE_FRAME_MS)this.action=null;
             }
             if(this.action)return;
             this.state='follow';
@@ -157,27 +172,27 @@ class EggPawn {
             sheet=supportArt.hurt;
             frame=pawnHurt[Math.floor((now-this.hitAt)/55)];
         }
-        else if(this.state==='weapon'){
-            const age=this.action?now-this.action.started:0;
-            sheet=age<320?supportArt.gun:supportArt.shot;list=age<320?pawnGun:pawnShot;
-        }else if(this.state==='drill'){
-            const age=this.action?now-this.action.started:0;
-            sheet=age<230?supportArt.drill:supportArt.blade;
-            list=age<230?pawnDrill:pawnBlade;
-            frame=list[age<230?Math.floor(age/64)%list.length:Math.floor((age-230)/66)%list.length];
-        }
-        else if(this.state==='bomb'){
-            sheet=this.action?.grenade?supportArt.grenade:supportArt.mine;
-            list=this.action?.grenade?pawnGrenade:pawnMine;
-        }else if(this.vx){sheet=supportArt.run;list=pawnRun;}
-        if(!hurt&&this.state==='weapon'&&this.action){
+        else if(this.action){
             const age=now-this.action.started;
-            if(age<320)frame=list[Math.floor(age/58)%list.length];
-            else{sheet=supportArt.shot;list=pawnShot;frame=list[Math.floor((age-320)/72)%list.length];}
-        }else if(!hurt&&this.state==='bomb'&&this.action)frame=list[Math.floor((now-this.action.started)/68)%list.length];
-        frame ??= list[Math.floor(now/(this.vx?58:83))%list.length] ?? list[0];
-        const [,,sw,sh]=frame, scale=this.height/sh, h=this.height,w=sw*scale;
-        const x=this.x-game.cameraX+(this.width-w)/2,y=this.floorY-h;
+            if(this.action.kind==='weapon'){
+                sheet=age<SHOT_START?supportArt.gun:supportArt.shot;
+                frame=age<SHOT_START?actionFrame(pawnGun,age,GUN_FRAME_MS):actionFrame(pawnShot,age-SHOT_START,SHOT_FRAME_MS);
+            }else if(this.action.kind==='drill'){
+                sheet=age<BLADE_START?supportArt.drill:supportArt.blade;
+                frame=age<BLADE_START?actionFrame(pawnDrill,age,DRILL_FRAME_MS):actionFrame(pawnBlade,age-BLADE_START,BLADE_FRAME_MS);
+            }else if(this.action.kind==='bomb'){
+                sheet=this.action.grenade?supportArt.grenade:supportArt.mine;
+                frame=this.action.grenade?actionFrame(pawnGrenade,age,GRENADE_FRAME_MS):actionFrame(pawnMine,age,68);
+                if(age>=(this.action.grenade?pawnGrenade.length*GRENADE_FRAME_MS:204)){
+                    sheet=supportArt.idle;frame=undefined;
+                }
+            }
+        }else if(this.vx){sheet=supportArt.run;list=pawnRun;}
+        frame ??= list[Math.floor(now/(this.vx?58:83))%list.length];
+        const [,,sw,sh,anchor=sw/2,feet=sh]=frame;
+        const scale=this.height/44, h=sh*scale,w=sw*scale;
+        const x=center(this)-game.cameraX-(this.facing<0?sw-anchor:anchor)*scale;
+        const y=this.floorY-feet*scale;
         drawFrame(sheet,frame,x,y,w,h,this.facing<0);
         drawHealth(this);
         if(now<this.bubbleUntil){const b=pawnBubbles[this.bubble];drawFrame(pawnSheet,b,this.x-game.cameraX+this.width/2-11,this.y-24,22,24);}

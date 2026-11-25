@@ -123,7 +123,15 @@ export function dealDamage(receiver, baseDamage, options = {}) {
     receiver.leafBlockUntil=now+530;
     if(DEBUG_COMBAT.enabled)console.log('[LEAF SHIELD] Hoja interceptó el impacto:',attackName);return 0;
   }
+  if (options.lowAttack && !options.projectile && receiver.isDrillDefending?.()) baseDamage *= .6;
+  if (receiver.kAction==='lowCounter' && options.projectile) baseDamage *= .55;
   const weakBasicShot = options.basicShot && baseDamage < 6;
+  if (weakBasicShot && baseDamage > 0 && receiver.characterId === 'knuckles' &&
+      receiver.isSpinning && receiver.spinPelletArmor > 0) {
+    receiver.spinPelletArmor--;
+    receiver.lastGuardImpact = { blocked: true, broken: false, front: true, at: combatNow() };
+    return 0;
+  }
   const lightPellet = weakBasicShot && attacker?.characterId !== 'bass' && attackName !== 'Bass Buster';
   const shieldDamage = receiver.absorbCopyShield?.(baseDamage, options) ?? baseDamage;
   if (baseDamage > 0 && shieldDamage === 0) {
@@ -215,7 +223,7 @@ export function dealDamage(receiver, baseDamage, options = {}) {
     receiver.hitstunUntil = Math.max(receiver.hitstunUntil || 0, now + hitstunMs);
   }
   if(finalDamage>0 && typeof receiver.onDamageTaken==='function') {
-    receiver.onDamageTaken({attacker,attackName,damage:finalDamage,stagger:!lightPellet||guardBroken});
+    receiver.onDamageTaken({attacker,attackName,projectile:options.projectile,damage:finalDamage,stagger:!lightPellet||guardBroken});
   }
   impactWind(receiver,guarded?raw:finalDamage,options,guarded);
   if (finalDamage > 0) {

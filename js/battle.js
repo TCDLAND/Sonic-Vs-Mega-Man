@@ -19,7 +19,7 @@ import { Chaos } from './chaos.js';
 import { Tails } from './tails.js';
 import { MetalSonic } from './metal-sonic.js';
 import { Shadow } from './shadow.js';
-import { Knuckles } from './knuckles.js';
+import { Knuckles } from './knuckles.js?v=knuckles-moves-3';
 import { Silver } from './silver.js';
 import { X } from './x.js';
 import { Zero } from './zero.js';

@@ -332,6 +332,14 @@ export function checkTongueCollision(attacker, receiver) {
     const rw = bounds.w;
     const rh = bounds.h;
     const STEP = 4;
+    const applyTongueHit = () => {
+        const grab = attacker.characterId === 'espio' && attacker.tongueType === 'forward';
+        attacker.tongueHitDone = true;
+        const damage = dealDamage(receiver, attacker.tongueDamage, {
+            attacker, attackName: grab ? 'Agarre de lengua' : 'Lengua', ignoreGuard: grab
+        });
+        if (grab && damage > 0) receiver.vx = -attacker.tongueDirection * 12;
+    };
 
     for (const cell of cells) {
         if (!cell.isDamageCell) continue;
@@ -344,8 +352,7 @@ export function checkTongueCollision(attacker, receiver) {
         try {
             imageData = tongueCtx.getImageData(0, 0, cell.w, cell.h);
         } catch (e) {
-            dealDamage(receiver, attacker.tongueDamage, { attacker, attackName: 'Lengua' });
-            attacker.tongueHitDone = true;
+            applyTongueHit();
             return;
         }
 
@@ -364,8 +371,7 @@ export function checkTongueCollision(attacker, receiver) {
                 const idx = (localY * cell.w + localX) * 4;
                 const alpha = data[idx + 3];
                 if (alpha > 0) {
-                    dealDamage(receiver, attacker.tongueDamage, { attacker, attackName: 'Lengua' });
-                    attacker.tongueHitDone = true;
+                    applyTongueHit();
                     return;
                 }
             }
@@ -400,6 +406,7 @@ export function checkBassBulletCollision(bullet, receiver) {
 // APLICAR DAÑO DE BALA (ACTUALIZADO)
 // ============================
 export function applyBulletDamage(bullet, receiver) {
+    if (receiver.reflectDrillProjectile?.(bullet)) return;
     if (receiver.isSpinDashActive) {
         const handled = resolveSpinVsProjectile(receiver, bullet);
         if (handled || !bullet.active) return;

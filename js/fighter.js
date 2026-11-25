@@ -804,10 +804,12 @@ export class Fighter {
         if (this.spinChargeLevel >= 3) return;
 
         const now = combatNow();
-        const interval = (this.spinProfile || getSpinProfile(this.spinProfileName)).chargeIntervalMs;
+        const interval = (this.spinProfile || getSpinProfile(this.spinProfileName)).chargeIntervalMs *
+            (this.characterId === 'knuckles' ? .8 : 1);
         if (this.spinChargeLevel > 0 && now - this.spinLastChargeAt < interval) return;
 
         this.isSpinning = true;
+        if (this.characterId === 'knuckles' && this.spinChargeLevel === 0) this.spinPelletArmor = 2;
         this.spinChargeLevel = game.mode==='practice' ? 3 : this.spinChargeLevel+1;
         this.spinLastChargeAt = now;
         this.spinDirection = (this.x < opponentX) ? 1 : -1;

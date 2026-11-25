@@ -377,6 +377,7 @@ export class Zero extends PrototypeFighter {
     const damage=dealDamage(receiver,spec.damage,{
       attacker:this,attackName:`Z-Saber Slash ${this.zeroAttack}`,
       element: ['FIREUP', 'FIREDIVE'].includes(this.zeroAttack) ? 'fire' : undefined,
+      lowAttack:this.zeroAttack==='CROUCH'||spec.low,
       ignoreGuard:(this.zeroAttack==='CROUCH'||spec.low)&&receiver.guardType==='high'
     });
     this.zeroAttackHit=true;

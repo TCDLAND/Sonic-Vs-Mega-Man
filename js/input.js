@@ -16,7 +16,7 @@ import { Sonic } from './sonic.js';
 import { Shadow } from './shadow.js';
 import { Zero } from './zero.js';
 import { Rock } from './rock.js';
-import { Knuckles } from './knuckles.js';
+import { Knuckles } from './knuckles.js?v=knuckles-moves-3';
 import { Bass, Treble } from './bass.js';
 import { startBattle, returnToCharacterSelect, switchTeamFighter, chooseTrainingTeams } from './battle.js?v=team3-1';
 import { BusterProjectile, getBusterLevel } from './buster-system.js';
@@ -26,7 +26,7 @@ import { openTournamentMenu, tournamentRunning, tournamentSimulationActive, canc
 import { modeOptionAt, resultActionAt } from './menu-screen.js?v=online-3v3-2';
 import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
-import { isBattleHelpOpen, toggleBattlePause } from './pause-menu.js?v=combo-silver-2';
+import { isBattleHelpOpen, toggleBattlePause } from './pause-menu.js?v=knuckles-moves-3';
 import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
 import { openOnlineLobby, handleOnlineSelectionKey, releaseOnlineInputs, routeOnlineKey } from './online.js?v=online-controls-1';
 
@@ -330,6 +330,37 @@ export function setupInput() {
         p1.keys[e.code] = true;
         p2.keys[e.code] = true;
 
+        for (const [k,opp] of [[p1,p2],[p2,p1]]) {
+            if (!(k instanceof Knuckles) || e.repeat) continue;
+            const toward = opp.x > k.x ? k.controls.right : k.controls.left;
+            const back = toward === k.controls.right ? k.controls.left : k.controls.right;
+            const down = k.keys[k.controls.crouch];
+            const forward = k.keys[toward];
+            const backward = k.keys[back];
+            const special = e.code === k.controls.heavy
+                ? (down ? 'lowCounter' : forward ? 'grab2' : backward ? 'parry' : null)
+                : e.code === k.controls.kickLight
+                    ? (down ? 'ken' : backward ? 'parry' : forward ? 'last' : null)
+                    : e.code === k.controls.attack
+                        ? (forward && down ? 'mega' : backward ? 'taunt' : forward ? 'charged' : null)
+                        : e.code === k.controls.kickHeavy && forward && !down && k.isGrounded ? 'headbutt' : null;
+            if (!k.isGrounded && e.code===k.controls.attack && !k.glide) {k.startSpecial('airPunch',toward===k.controls.right?1:-1); continue;}
+            if (special && k.isGrounded) { k.startSpecial(special,toward===k.controls.right?1:-1); continue; }
+            if (e.code === k.controls.attack) {
+                if (k.keys[k.controls.crouch]) k.startFloorPunch(); else k.startPunch();
+            }
+            if (e.code === k.controls.heavy) {
+                if (k.keys[toward]) k.startGrab(); else k.startPunch2();
+            }
+            if (e.code === k.controls.kickLight) k.startUpper();
+            if (e.code === k.controls.kickHeavy) {
+                if (k.minerPhase === 'under') k.beginMinerExit();
+                else if (k.keys[k.controls.crouch] && k.isGrounded) { k.startMiner(); }
+                else if (!k.isGrounded) { if (k.glide) k.attackFromGlide(); else k.startGlide(k.facingDirection); }
+                else k.startFloorPunch();
+            }
+        }
+
         if (!e.repeat) for (const fighter of [p1,p2]) {
             if (handleBasicCombo(fighter,e.code)) return;
         }
@@ -452,9 +483,11 @@ export function setupInput() {
         // ESPIO
         // ================================================================
         if (p1 instanceof Espio && !e.repeat) {
+            if (e.code === 'KeyJ' && p1.keys[p1.controls.crouch]) { p1.startCloak(); return; }
             if (p1.keys[p1.controls.crouch]) {
                 const technique={KeyI:'drill',KeyM:'tornado',KeyK:'smoke'}[e.code];
-                if (technique) { p1.startNinjaTechnique(technique,p2); return; }
+                if (technique) { p1.startNinjaTechnique(technique,p2, technique === 'drill' &&
+                    p1.keys[p1.x < p2.x ? p1.controls.right : p1.controls.left]); return; }
             }
             if (e.code === 'KeyJ') {
                 const p1Toward = (p2.x > p1.x) ? 'KeyD' : 'KeyA';
@@ -563,23 +596,7 @@ export function setupInput() {
         // M Upper | K en aire Glide/Glide Punch | S+K Spin Minero
         // K bajo tierra = salir donde está | doble W en pared = soltarse
         // ================================================================
-        for (const [k,opp] of [[p1,p2],[p2,p1]]) {
-            if (!(k instanceof Knuckles) || e.repeat) continue;
-            const toward = opp.x > k.x ? k.controls.right : k.controls.left;
-            if (e.code === k.controls.attack) {
-                if (k.keys[k.controls.crouch]) k.startFloorPunch(); else k.startPunch();
-            }
-            if (e.code === k.controls.heavy) {
-                if (k.keys[toward]) k.startGrab(); else k.startPunch2();
-            }
-            if (e.code === k.controls.kickLight) k.startUpper();
-            if (e.code === k.controls.kickHeavy) {
-                if (k.minerPhase === 'under') k.beginMinerExit();
-                else if (k.keys[k.controls.crouch] && k.isGrounded) { k.startMiner(); }
-                else if (!k.isGrounded) { if (k.glide) k.attackFromGlide(); else k.startGlide(k.facingDirection); }
-                else k.startFloorPunch();
-            }
-        }
+
 
         // ================================================================
         // ROCK + RUSH + BEAT
@@ -685,9 +702,11 @@ export function setupInput() {
         }
 
         if (!e.repeat && p2 instanceof Espio) {
+            if (e.code === 'Comma' && p2.keys[p2.controls.crouch]) { p2.startCloak(); return; }
             if (p2.keys[p2.controls.crouch]) {
                 const technique={Period:'drill',Minus:'tornado',Equal:'smoke'}[e.code];
-                if (technique) { p2.startNinjaTechnique(technique,p1); return; }
+                if (technique) { p2.startNinjaTechnique(technique,p1, technique === 'drill' &&
+                    p2.keys[p2.x < p1.x ? p2.controls.right : p2.controls.left]); return; }
             }
             if (e.code === 'Comma') {
                 if (p2.keys[p2Toward]) {

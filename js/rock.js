@@ -1,6 +1,7 @@
 import { combatNow } from './combat-clock.js';
 import { captureTournamentTool } from './tournament-damage.js';
 import { worldWidth } from './config.js';
+import { X } from './x.js';
 import { initBuster, getBusterLevel } from './buster-system.js';
 import { configureCombatant, dealDamage } from './combat-system.js';
 import { PrototypeFighter } from './prototype-fighter.js';
@@ -1127,6 +1128,13 @@ export class Rock extends PrototypeFighter {
   // Sólo puede existir UN Rolling Cutter de Rock a la vez.
   if(game.projectiles.some(p=>p.active&&p.owner===this&&p.type==='rolling-cutter')||!this.spendWeaponAmmo(10))return false;
   this.cutShotActive=true;this.cutShotArc=arc;this.cutShotStartedAt=combatNow();this.cutShotSpawned=false;this.vx=0;this.isDashing=false;this.facingLocked=true;return true;
+ }
+ drawBusterSprite(shot, camera) {
+  if (shot.level < 1 || shot.level > 3) return false;
+  return X.prototype.drawBusterSprite.call(this, shot, camera);
+ }
+ drawShotSprite(shot, camera, key, frame) {
+  return X.prototype.drawShotSprite.call(this, shot, camera, key, frame);
  }
  onBusterFired(level){
   const now=combatNow();this.fireStartedAt=now;this.fireUntil=now+260;
