@@ -321,6 +321,7 @@ function finish(message) {
         if(overlay) {overlay.box.remove();overlay=null;}
         window.parent.postMessage({type:'svmm-simulation-lane-finished',laneId:done?.laneId,
             report:stats.roundRobin ?? null,matches:done?.matches ?? 0,
+            error:stats.lastSimulationError ?? null,
             memory:stats.lastSimulationMemory?.measurement ?? null},location.origin);
         return;
     }
@@ -495,10 +496,23 @@ function startParallelRoundRobin(options) {
         },SIMULATION_STALL_TIMEOUT_MS);
     }
 
-    function onLaneFinished(index,report,matchesDone) {
+    function onLaneFinished(index,report,matchesDone,laneError=null) {
         if(!current?.parallel || current.laneDone[index])return;
         const lane=stats.roundRobinLatest?.run?.lanes?.[index];
-        if(lane) Object.assign(lane,{completedMatches:matchesDone,status:report?'complete':'closed-without-report'});
+        if(lane) Object.assign(lane,{completedMatches:matchesDone,status:laneError?'interrupted':report?'complete':'closed-without-report',
+            ...(laneError?{error:laneError}:{})});
+        if(laneError&&!stats.lastSimulationError) {
+            stats.lastSimulationError={...laneError,failedLane:index+1,completedMatches:matchesDone,
+                cause:'combat-runtime-error'};
+            if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
+                completedMatches:current.laneMatches.reduce((sum,count)=>sum+count,0)+matchesDone,
+                status:'interrupted',finishedAt:new Date().toISOString(),error:stats.lastSimulationError
+            });
+            current.stopRequested=true;
+            for(let laneIndex=0;laneIndex<2;laneIndex++) if(laneIndex!==index&&!current.laneDone[laneIndex])
+                current.frames[laneIndex]?.contentWindow?.postMessage({type:'svmm-simulation-stop'},location.origin);
+            persist();
+        }
         if(!report && !stats.lastSimulationError) {
             stats.lastSimulationError={format:'roundRobin',failedLane:index+1,completedMatches:matchesDone,
                 cause:'iframe-closed-without-report',
@@ -563,7 +577,7 @@ function startParallelRoundRobin(options) {
                 ' · 2 combates simultáneos';
         } else if(data?.type==='svmm-simulation-lane-finished') {
             if(!Number.isInteger(data.laneId)||!frames[data.laneId]||event.source!==frames[data.laneId].frame.contentWindow)return;
-            onLaneFinished(data.laneId,data.report,data.matches);
+            onLaneFinished(data.laneId,data.report,data.matches,data.error);
         }
     };
     window.addEventListener('message',current.laneMessageHandler);
