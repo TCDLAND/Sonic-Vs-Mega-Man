@@ -5,6 +5,7 @@ import { robotFrame, drawRobotFrame } from './robot-sprites.js';
 import { animationsFor } from './animation-catalog.js';
 import { updatedFrame } from './fighter-update-art.js';
 import { X_FRAMES } from './x-frames.js';
+import { withCharacterPalette, getSelectionPalette } from './character-palettes.js?v=palette-exact-4';
 
 const roster = [
     { id: 'espio', label: 'ESPIO', color: '#a661f4' },
@@ -308,7 +309,12 @@ function drawSide(player) {
     const panelTitle = game.mode === 'ai' ? isP1 ? 'IA AZUL' : 'IA ROJA' : isP1 ? 'PLAYER 1' : ['cpu', 'team'].includes(game.mode) ? 'CPU RIVAL' : 'PLAYER 2';
     const panelSubtitle = game.mode === 'ai' ? 'SELECCIONA SU PELEADOR' : isP1 ? 'EQUIPO AZUL' : ['cpu', 'team'].includes(game.mode) ? 'ELIGE AL RIVAL' : 'EQUIPO ROJO';
     drawPanel(panelX, 318, 600, 350, accent, panelTitle, panelSubtitle);
-    drawPortrait(entry, portraitX, 85, 218, 215, accent, player, confirmed);
+    const currentPalette=getSelectionPalette(selection,isP1?'p1':'p2');
+    withCharacterPalette(entry.id, currentPalette, () =>
+        drawPortrait(entry, portraitX, 85, 218, 215, accent, player, confirmed));
+    ctx.save();ctx.textAlign='center';ctx.font='800 11px system-ui';
+    ctx.fillStyle=currentPalette===1?'#baf7a9':'rgba(255,255,255,.78)';
+    ctx.fillText(currentPalette===1?'PALETA 2':'PALETA 1',portraitX+109,294);ctx.restore();
     drawGrid(index, gridX, accent, confirmed, player);
 
     ctx.fillStyle = confirmed ? '#a7ffc4' : 'rgba(255,255,255,.78)';
@@ -317,10 +323,10 @@ function drawSide(player) {
     if (game.mode === 'online') {
         const ownsSide = (game.onlineRole === 'host' && isP1) || (game.onlineRole === 'guest' && !isP1);
         ctx.fillText(ownsSide ? 'TÚ: MOVER A / D / W / S' : 'RIVAL EN LÍNEA', isP1 ? 474 : 841, 641);
-        ctx.fillText(ownsSide ? 'CONFIRMAR: J' : 'ESPERANDO SELECCIÓN', isP1 ? 474 : 841, 657);
+        ctx.fillText(ownsSide ? 'CONFIRMAR: J  ·  COLOR: I / Y' : 'ESPERANDO SELECCIÓN', isP1 ? 474 : 841, 657);
     } else {
         ctx.fillText(isP1 ? 'MOVER: A / D / W / S' : 'MOVER: FLECHAS', isP1 ? 474 : 841, 641);
-        ctx.fillText(isP1 ? 'CONFIRMAR: J' : 'CONFIRMAR: ,', isP1 ? 474 : 841, 657);
+        ctx.fillText(isP1 ? 'CONFIRMAR: J  ·  COLOR: I / Y' : 'CONFIRMAR: ,  ·  COLOR: . / Y', isP1 ? 474 : 841, 657);
     }
 }
 

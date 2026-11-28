@@ -29,7 +29,7 @@ import { Eggman } from './eggman.js';
 import { Wily } from './wily.js';
 import { Emerl } from './emerl.js';
 import { MegaManZero } from './megaman-zero.js';
-import { CpuFighter } from './cpu.js?v=team3-1';
+import { CpuFighter } from './cpu.js?v=team3-2';
 
 const CPU_ROSTER = ['eggman', 'metal-sonic', 'sonic', 'tails', 'chaos', 'silver', 'megaman-zero', 'knuckles', 'shadow', 'rock', 'bass', 'zero', 'protoman', 'x'];
 
@@ -105,10 +105,15 @@ export function startBattle(storyMatch) {
     if (!storyMatch) music.play(game.battleStage?.track ?? 'highway');
     if (game.mode === 'ai') {
         game.teamRosters = chooseTrainingTeams();
+        game.teamPaletteRosters = [[], []];
     }
     game.isolateCpu=Boolean(storyMatch?.isolateCpu);
     const teamMatch = game.mode === 'ai' || game.mode === 'team' || Boolean(storyMatch) || (game.mode==='online' && game.teamRosters?.every(roster=>roster.length===3));
     const rosters = storyMatch?.rosters ?? game.teamRosters;
+    if (teamMatch && rosters) {
+        if (storyMatch?.rosters) game.teamPaletteRosters = storyMatch.paletteRosters ?? rosters.map(roster=>roster.map(()=>0));
+        else if (!game.teamPaletteRosters?.every(Array.isArray)) game.teamPaletteRosters = rosters.map(roster=>roster.map(()=>0));
+    }
     game.teamActiveIndex = { p1: 0, p2: 0 };
     game.tagRequests = { p1: false, p2: false };
     game.tagCooldowns = { p1: 0, p2: 0 };
@@ -152,6 +157,9 @@ export function startBattle(storyMatch) {
             p1: rosters[0].map((id) => createFighter(id, 260, floor, p1Controls)),
             p2: rosters[1].map((id) => createFighter(id, 920, floor, p2Controls))
         };
+        for (const side of ['p1','p2']) game.teamFighters[side].forEach((fighter,index)=>{
+            fighter.paletteIndex = game.teamPaletteRosters?.[side==='p1'?0:1]?.[index] === 1 ? 1 : 0;
+        });
         if (storyMatch?.health) {
             const fighters = game.teamFighters.p1;
             fighters.forEach((fighter, index) => { fighter.health = storyMatch.health[index]; });
@@ -166,6 +174,8 @@ export function startBattle(storyMatch) {
         game.teamFighters = null;
         game.p1 = createFighter(p1Char, 260, floor, p1Controls);
         game.p2 = createFighter(p2Char, 1000, floor, p2Controls);
+        game.p1.paletteIndex = game.characterSelection.p1Palette === 1 ? 1 : 0;
+        game.p2.paletteIndex = game.characterSelection.p2Palette === 1 ? 1 : 0;
     }
 
     for (const fighter of [game.p1,game.p2]) {
@@ -268,7 +278,7 @@ export function returnToCharacterSelect() {
     music.stop();
     game.characterSelection.p1Confirmed = false;
     game.characterSelection.p2Confirmed = false;
-    if (game.mode === 'team') game.teamRosters = [[], []];
+    if (game.mode === 'team') { game.teamRosters = [[], []]; game.teamPaletteRosters = [[], []]; }
     game.countdown = null;
     game.winner = null;
     game.p1 = null;

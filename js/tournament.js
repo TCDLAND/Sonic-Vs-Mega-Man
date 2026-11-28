@@ -7,9 +7,11 @@ import { music } from './music.js';
 import { addWinDamage, beginTournamentDamage, endTournamentDamage } from './tournament-damage.js';
 
 const statsKey='svmm-tournament-results-v1';
+const characterLabProgressKey='svmm-character-lab-progress-v1';
 const TURN_SECONDS=99;
 const SIM_SECONDS=28;
 const SIMULATION_STALL_TIMEOUT_MS=600000;
+const CHARACTER_LAB_MATCH_TIMEOUT_MS=90000;
 const IS_SIMULATION_LANE = new URLSearchParams(location.search).has('simulationLane');
 let current, overlay;
 let memoryProbe = null;
@@ -53,7 +55,12 @@ function loadStats() {
     if (IS_SIMULATION_LANE) return {version:1,fighters:{},matchups:{},teams:{},completed:{singles:0,teams:0},recent:[]};
     try {
         const data=JSON.parse(localStorage.getItem(statsKey));
-        if (data?.version===1) return data;
+        if (data?.version===1) {
+            const progress=JSON.parse(localStorage.getItem(characterLabProgressKey));
+            const run=data.characterLabLatest?.[progress?.fighter];
+            if(run&&run.startedAt===progress.startedAt&&progress.snapshot)run.lastCheckpoint=progress.snapshot;
+            return data;
+        }
     } catch {}
     return {version:1,fighters:{},matchups:{},teams:{},completed:{singles:0,teams:0},recent:[]};
 }
@@ -75,12 +82,107 @@ function emptyRoundRobinReport() {
     return {fighters:{},matchups:{},teams:{},recent:[],completedBatches:0,tools:{},toolUses:{},mirrors:{},endings:{},winsByEnding:{},winDamage:{}};
 }
 
+const CPU_MOVE_CATALOG = {
+    rock: ['buster','rock_concrete','rock_cutter','rock_claw','rock_fire','rock_leaf','rock_bomb','rock_snake','rush_coil','rush_coil_intercept'],
+    knuckles: ['knuckles_miner','knuckles_grab','heavy','kick'], espio: ['espio_drill','espio_smoke','espio_tornado','espio_low_jab','espio_shuriken'],
+    eggman: ['egg_buzzer','egg_motobug','egg_pawn_drill','egg_pawn_weapon','egg_pawn_bomb','egg_orbit','egg_low','egg_missile'],
+    bass: ['bass_shot','bass_diagonal','bass_kick','bass_air_punch','bass_jet','treble','treble_bison'],
+    sonic: ['sonic_barrage','sonic_jab','sonic_windmill','sonic_wave','sonic_rocket','sonic_eagle','sonic_homing'],
+    shadow: ['teleport','chaos','magic','heavy','kick'], silver: ['silver_absorb','silver_reflect','silver_assist','silver_transform','silver_hover',
+        'silver_air','silver_airDash','silver_grab','silver_shock','silver_upper','silver_jab','silver_medium','silver_push','silver_strongPush',
+        'silver_orbit','silver_cast','silver_barrage','silver_catastrophe','silver_storm'],
+    tails: ['tails_bomb','tails_dunk','tails_typhoon','tails_cannon','tails_upper','tails_flick','tails_cyclone','tails_hook','tails_iq200'],
+    'metal-sonic': ['metal_air','metal_wave','metal_cannon','metal_diamond'], emerl: ['emerl_punch','emerl_roundhouse','emerl_upper','emerl_rocket','emerl_waveKick'],
+    'megaman-zero': ['mmzero_buster','mmzero_saberAir','mmzero_saberA','mmzero_recoil','mmzero_chain','mmzero_cover_jump','mmzero_shield_advance'],
+    x: ['buster','saber','heavy'], zero: ['buster','heavy'], protoman: ['buster','heavy']
+};
+const MOVE_LABELS = {approach:'Acercarse',guard:'Cubrirse',evade:'Esquivar',roam:'Reposicionarse',jab:'Golpe rápido',heavy:'Golpe fuerte',kick:'Patada',spin:'Giro',buster:'Disparo buster',saber:'Sable',teleport:'Teletransporte',magic:'Magia',chaos:'Chaos Control',rock_concrete:'Concrete',rock_cutter:'Rolling Cutter',rock_fire:'Fuego',rock_leaf:'Leaf Shield',rock_bomb:'Hyper Bomb',rock_snake:'Search Snake',espio_drill:'Trompo ninja',espio_smoke:'Corte entre humo',espio_tornado:'Tornado ninja',espio_low_jab:'Puño bajo',espio_shuriken:'Shuriken'};
+
+function recordCharacterLab(a,b,winner,reason,damage,elapsed) {
+    const fighter=current.characterLab;
+    const statsFor=stats.characterLabs ??= {};
+    const report=statsFor[fighter] ??= {version:1,fighter,completedRuns:0,matches:0,wins:0,losses:0,draws:0,
+        attackAttempts:0,actions:{},damageByAttack:{},defense:{guardFrames:0,decisionFrames:0,blocks:0},opponents:{},recent:[]};
+    const cpu=game.cpuAgentP1;
+    const counts=cpu?.actionCounts ?? {};
+    const opponent=b.roster[0];
+    const result=winner==='draw'?'draw':winner==='p1'?'win':'loss';
+    const attackActions=Object.entries(counts).filter(([name])=>!['approach','guard','evade','roam'].includes(name));
+    const attackTotal=attackActions.reduce((sum,[,count])=>sum+count,0);
+    report.attackAttempts+=attackTotal;
+    for(const [name,count] of Object.entries(counts)) {
+        const entry=report.actions[name] ??= {uses:0,label:MOVE_LABELS[name]??name};
+        entry.uses+=count;
+    }
+    for(const name of CPU_MOVE_CATALOG[fighter]??[])report.actions[name]??={uses:0,label:MOVE_LABELS[name]??name};
+    for(const [name,entry] of Object.entries(report.actions)) if(!['approach','guard','evade','roam'].includes(name))
+        entry.percentOfAttacks=report.attackAttempts?Math.round(10000*entry.uses/report.attackAttempts)/100:0;
+    const decisionFrames=cpu?.decisionFramesThisMatch ?? 0;
+    const guardFrames=cpu?.guardFramesThisMatch ?? 0;
+    report.defense.guardFrames+=guardFrames;
+    report.defense.decisionFrames+=decisionFrames;
+    report.defense.blocks+=cpu?.blocksThisMatch ?? 0;
+    const attacks=damage?.p1?.attacks ?? [];
+    const damageTotal=attacks.reduce((sum,hit)=>sum+hit.damage,0);
+    for(const hit of attacks) {
+        const entry=report.damageByAttack[hit.attack] ??= {hits:0,damage:0};
+        entry.hits+=hit.hits;
+        entry.damage=Math.round((entry.damage+hit.damage)*100)/100;
+    }
+    report.matches++;
+    report[result==='win'?'wins':result==='loss'?'losses':'draws']++;
+    const versus=report.opponents[opponent] ??= {wins:0,losses:0,draws:0,matches:0};
+    versus[result==='win'?'wins':result==='loss'?'losses':'draws']++;
+    versus.matches++;
+    report.recent.push({opponent,result,reason,seconds:elapsed,damage:Math.round(damageTotal*100)/100,
+        actions:{...counts},guard:{frames:guardFrames,decisionFrames,blocks:cpu?.blocksThisMatch??0},
+        hits:attacks.map(({attack,damage,hits,category})=>({attack,damage,hits,category}))});
+    report.recent=report.recent.slice(-100);
+    const latest=stats.characterLabLatest ??= {};
+    latest[fighter] ??= {fighter,startedAt:new Date().toISOString(),matches:0,opponents:{},actions:{},defense:{guardFrames:0,decisionFrames:0,blocks:0},recent:[]};
+    const run=latest[fighter];run.matches++;
+    const rival=run.opponents[opponent] ??= {wins:0,losses:0,draws:0};rival[result==='win'?'wins':result==='loss'?'losses':'draws']++;
+    for(const [name,count] of Object.entries(counts))run.actions[name]=(run.actions[name]??0)+count;
+    run.attackAttempts=(run.attackAttempts??0)+attackTotal;
+    run.defense.guardFrames+=guardFrames;run.defense.decisionFrames+=decisionFrames;run.defense.blocks+=cpu?.blocksThisMatch??0;
+    run.recent.push(report.recent.at(-1));
+    current.characterLabPairsDone++;
+    run.completedMatches=run.matches;
+    run.activeCombat={status:'finished',blue:keyOf(a),red:keyOf(b),finishedAt:new Date().toISOString(),winner,result,reason};
+    if(current.characterLabPairsDone===current.characterLabOpponents.length) {
+        report.completedRuns++;
+        Object.assign(run,{status:'complete',finishedAt:new Date().toISOString(),activeCombat:null});
+        run.neverAttempted=(CPU_MOVE_CATALOG[fighter]??[]).filter(name=>!run.actions[name]);
+        run.attackPercentages=Object.fromEntries(Object.entries(run.actions)
+            .filter(([name])=>!['approach','guard','evade','roam'].includes(name))
+            .map(([name,uses])=>[name,run.attackAttempts?Math.round(10000*uses/run.attackAttempts)/100:0]));
+        run.guardTimePercent=run.defense.decisionFrames?
+            Math.round(10000*run.defense.guardFrames/run.defense.decisionFrames)/100:0;
+    }
+    report.cpuStrategyMoveCatalog=[...(CPU_MOVE_CATALOG[fighter]??[])];
+    report.neverAttempted= report.cpuStrategyMoveCatalog.filter(name=>!report.actions[name]?.uses);
+}
+
 function beginRoundRobinRun(options) {
-    if(IS_SIMULATION_LANE || options.kind!=='roundRobin') return;
+    if(IS_SIMULATION_LANE || !['roundRobin','characterLab'].includes(options.kind)) return;
     const roster=[...options.roster];
     const rosterSize=roster.length;
-    const expectedMatches=(options.total||1)*(options.uniquePairs?rosterSize*(rosterSize-1)/2:
+    const expectedMatches=options.characterLab?Math.max(0,rosterSize-1):(options.total||1)*(options.uniquePairs?rosterSize*(rosterSize-1)/2:
         options.mirrors?rosterSize*rosterSize:rosterSize*(rosterSize-1));
+    if(options.characterLab) {
+        stats.characterLabs ??= {};
+        stats.characterLabLatest ??= {};
+        const fighter=options.characterLab;
+        stats.characterLabLatest[fighter]={fighter,startedAt:new Date().toISOString(),status:'in-progress',
+            expectedMatches,completedMatches:0,skippedMatches:0,skippedOpponents:[],matches:0,opponents:{},activeCombat:null,
+            actions:Object.fromEntries((CPU_MOVE_CATALOG[fighter]??[]).map(name=>[name,0])),
+            defense:{guardFrames:0,decisionFrames:0,blocks:0},recent:[]};
+        stats.characterLabs[fighter] ??= {version:1,fighter,completedRuns:0,matches:0,wins:0,losses:0,draws:0,
+            attackAttempts:0,actions:{},damageByAttack:{},defense:{guardFrames:0,decisionFrames:0,blocks:0},opponents:{},recent:[]};
+        delete stats.lastSimulationError;
+        persist();
+        return;
+    }
     stats.roundRobinLatest=emptyRoundRobinReport();
     stats.roundRobinLatest.run={
         roster, mirrors:Boolean(options.mirrors), uniquePairs:Boolean(options.uniquePairs),
@@ -128,12 +230,34 @@ function persist() {
     try { localStorage.setItem(statsKey,JSON.stringify(stats)); }
     catch { if(current) current.storageFailed=true; }
 }
+export function sampleCharacterLabCombat() {
+    if(current?.kind!=='characterLab'||!current.activePair||IS_SIMULATION_LANE)return;
+    const now=combatNow();
+    if(now-(current.lastCharacterLabCheckpointAt??0)<1000)return;
+    current.lastCharacterLabCheckpointAt=now;
+    const run=stats.characterLabLatest?.[current.characterLab];
+    if(!run)return;
+    const snapshot=fighter=>({character:fighter?.characterId,state:fighter?.state,
+        health:Math.round((fighter?.health??0)*100)/100,x:Math.round(fighter?.x??0),y:Math.round(fighter?.y??0)});
+    run.lastCheckpoint={at:new Date().toISOString(),elapsedSeconds:Math.floor((now-current.matchAt)/1000),
+        blue:snapshot(game.p1),red:snapshot(game.p2),
+        blueActions:{...(game.cpuAgentP1?.actionCounts??{})},redActions:{...(game.cpuAgentP2?.actionCounts??{})},
+        projectiles:game.projectiles?.length??0,bassBullets:game.bassBullets?.length??0};
+    try { localStorage.setItem(characterLabProgressKey,JSON.stringify({
+        fighter:current.characterLab,startedAt:run.startedAt,snapshot:run.lastCheckpoint
+    })); } catch {}
+}
 function record(a,b,winner,reason) {
     const aKey=keyOf(a),bKey=keyOf(b);
     const elapsed=Math.round((combatNow()-current.matchAt)/1000);
     const defeated=winner==='p1'?game.p2:game.p1;
     const damage=endTournamentDamage(winner,reason,defeated);
     if(a.human||b.human) return;
+    if(current.kind==='characterLab') {
+        recordCharacterLab(a,b,winner,reason,damage,elapsed);
+        persist();
+        return;
+    }
     const isLab = current.kind==='roundRobin';
     const report = isLab
         ? stats.roundRobin ??= {fighters:{},matchups:{},teams:{},recent:[],completedBatches:0,tools:{},mirrors:{}}
@@ -195,7 +319,9 @@ function showStatus() {
     if(!overlay || !current)return;
     const {status,next,bracket}=overlay;
     const isLab=current.kind==='roundRobin';
-    status.textContent=(isLab?'Todos contra todos · '+current.matches+'/'+(current.pairs.length*current.total)+' combates'
+    const isCharacterLab=current.kind==='characterLab';
+    status.textContent=(isCharacterLab?`Análisis de ${fighterLabel(current.characterLab)} · ${current.matches}/${current.characterLabOpponents.length} rivales`
+        :isLab?'Todos contra todos · '+current.matches+'/'+(current.pairs.length*current.total)+' combates'
         :'Torneo '+(current.finished+1)+'/'+current.total+' · ronda '+current.round
         +' · '+current.matches+' combates')
         +(current.activePair?' · '+current.activePair.map(keyOf).join(' vs. '):'')
@@ -204,10 +330,43 @@ function showStatus() {
     if (!isLab) bracket.textContent=current.pairs.map(([a,b])=>b?keyOf(a)+' vs. '+keyOf(b):keyOf(a)+' · pasa de ronda').join('\n')
         || 'Último cruce de la ronda';
 }
+function skipCharacterLabCombat(reason='manual') {
+    if(current?.kind!=='characterLab'||!current.activePair)return false;
+    window.clearTimeout(current.matchTimeoutId);
+    const pair=current.activePair;
+    const opponent=pair[1].roster[0];
+    const run=stats.characterLabLatest?.[current.characterLab];
+    if(run) {
+        run.skippedMatches=(run.skippedMatches??0)+1;
+        run.skippedOpponents??=[];
+        run.skippedOpponents.push({opponent,reason,skippedAt:new Date().toISOString(),
+            elapsedSeconds:Math.floor((combatNow()-current.matchAt)/1000),lastCheckpoint:run.lastCheckpoint??null});
+        run.activeCombat={status:'skipped',blue:keyOf(pair[0]),red:keyOf(pair[1]),reason,skippedAt:new Date().toISOString()};
+        persist();
+    }
+    endTournamentDamage();
+    current.activePair=null;
+    current.matches++;
+    if(current.matches>=current.characterLabOpponents.length) {
+        finish(`Análisis de ${fighterLabel(current.characterLab)} terminado · combate omitido`);
+    } else launch(current.pairs[current.matches]);
+    return true;
+}
 function launch([first,second],swap=false) {
     const pair=swap?[second,first]:[first,second];
     current.activePair=pair;
     current.waiting=false;
+    current.lastCharacterLabCheckpointAt=combatNow();
+    window.clearTimeout(current.matchTimeoutId);
+    if(current.kind==='characterLab') {
+        const latest=stats.characterLabLatest?.[current.characterLab];
+        if(latest) {
+            latest.status='in-progress';
+            latest.activeCombat={status:'in-progress',blue:keyOf(pair[0]),red:keyOf(pair[1]),
+                match:current.matches+1,startedAt:new Date().toISOString()};
+            persist();
+        }
+    }
     game.battleStage=battleStages[0];
     game.mode=current.teamSize===3?'team':'cpu';
     game.controlOverrides={p1:!pair[0].human,p2:!pair[1].human};
@@ -222,6 +381,7 @@ function launch([first,second],swap=false) {
         game.countdown={phase:'go',phaseStartedAt:combatNow()};
     } else music.play(game.battleStage.track);
     current.matchAt=combatNow();
+    if(current.kind==='characterLab') current.matchTimeoutId=window.setTimeout(()=>skipCharacterLabCombat('timeout'),CHARACTER_LAB_MATCH_TIMEOUT_MS);
     showStatus();
     if(IS_SIMULATION_LANE&&window.parent!==window) window.parent.postMessage({
         type:'svmm-simulation-combat-state',laneId:current.laneId,state:'in-progress',
@@ -257,6 +417,7 @@ function advance() {
 }
 export function tournamentResult(winner,reason) {
     if(!current?.activePair)return false;
+    window.clearTimeout(current.matchTimeoutId);
     const pair=current.activePair;
     record(...pair,winner,reason);
     current.matches++;
@@ -264,6 +425,13 @@ export function tournamentResult(winner,reason) {
         type:'svmm-simulation-combat-state',laneId:current.laneId,state:'finished',
         blue:keyOf(pair[0]),red:keyOf(pair[1]),match:current.matches,winner,reason
     },location.origin);
+    if (current.kind==='characterLab') {
+        if(current.matches>=current.characterLabOpponents.length) {
+            persist();
+            finish(`Análisis de ${fighterLabel(current.characterLab)} completo`);
+        } else launch(current.pairs[current.matches]);
+        return true;
+    }
     if (current.kind==='roundRobin') {
         if (IS_SIMULATION_LANE && window.parent !== window) {
             window.parent.postMessage({type:'svmm-simulation-progress',laneId:current.laneId,
@@ -316,6 +484,7 @@ export function skipCurrentSimulationCombat() {
 }
 function finish(message) {
     const done=current;
+    window.clearTimeout(done?.matchTimeoutId);
     if (done?.simulate) {
         if(done.kind==='roundRobin'&&stats.roundRobinLatest?.run?.status==='in-progress') {
             const expected=done.pairs.length*done.total;
@@ -338,6 +507,16 @@ function finish(message) {
             aggregate.averageMB = Math.round(aggregate.totalAverageMB / aggregate.runs * 100) / 100;
         }
         if(stats.roundRobinLatest?.run) stats.roundRobinLatest.run.memory=measurement;
+        persist();
+    }
+    if(done?.kind==='characterLab'&&done.characterLab) {
+        const latest=stats.characterLabLatest?.[done.characterLab];
+        if(latest) Object.assign(latest,{status:latest.error?'error':done.matches>=done.characterLabOpponents.length
+            ? latest.skippedMatches?'complete-with-skips':'complete' : 'interrupted',
+            completedMatches:latest.matches??0,finishedAt:new Date().toISOString(),
+            activeCombat:latest.activeCombat?.status==='in-progress'
+                ? {...latest.activeCombat,status:'interrupted',interruptedAt:new Date().toISOString(),reason:message}
+                : latest.activeCombat});
         persist();
     }
     if (IS_SIMULATION_LANE && window.parent !== window) {
@@ -377,7 +556,7 @@ function finish(message) {
     game.gameState=GAME_STATE.MODE;
     if(overlay) {overlay.box.remove();overlay=null;}
     music.stop();
-    showReport(message+(done?.simulate?' · '+done.matches+' combates':''),done?.kind==='roundRobin');
+    showReport(message+(done?.simulate?' · '+done.matches+' combates':''),done?.kind==='roundRobin',done?.kind==='characterLab'?done.characterLab:null);
 }
 
 export function tournamentSimulationActive(){return Boolean(current?.simulate);}
@@ -394,6 +573,7 @@ export function cancelTournament(){
     }
     finish('Torneo detenido');
 }
+export function skipCurrentCharacterLabCombat() { return skipCharacterLabCombat('manual'); }
 export function interruptTournamentSimulation(error){
     if(!current?.simulate)return;
     const [blue,red]=current.activePair?.map(keyOf) ?? [];
@@ -403,6 +583,15 @@ export function interruptTournamentSimulation(error){
         ...(error instanceof Error&&error.stack?{stack:error.stack}:{}),
         ...(error instanceof Error&&error.cause?{cause:String(error.cause)}:{})
     };
+    if(current.kind==='characterLab') {
+        const latest=stats.characterLabLatest?.[current.characterLab];
+        if(latest) {
+            latest.status='error';latest.error=stats.lastSimulationError;
+            latest.completedMatches=current.matches;
+            latest.activeCombat={status:'error',blue,red,match:current.matches+1,
+                error:stats.lastSimulationError,failedAt:new Date().toISOString()};
+        }
+    }
     if(stats.roundRobinLatest?.run) Object.assign(stats.roundRobinLatest.run,{
         completedMatches:current.matches,status:'interrupted',finishedAt:new Date().toISOString(),error:stats.lastSimulationError
     });
@@ -428,16 +617,28 @@ export function startTournament(options) {
     summary.textContent='Cuadro de esta ronda';details.append(summary,bracket);
     box.append(status,next,stop,details);document.body.append(box);
     overlay={box,status,next,bracket};
-    if (options.kind==='roundRobin') {
-        game.quietSimulation=!IS_SIMULATION_LANE;
+    if (options.kind==='roundRobin'||options.kind==='characterLab') {
+        // El análisis individual debe dibujar: varias animaciones y estados de
+        // ataque avanzan desde draw(), y en modo silencioso quedaban congelados.
+        game.quietSimulation=options.kind==='characterLab'?false:!IS_SIMULATION_LANE;
         music.stop();
         const pause=button('Pausar',()=>{
             current.paused=!current.paused;
             pause.textContent=current.paused?'Reanudar':'Pausar';
         });
         box.insertBefore(pause,stop);
+        if(options.kind==='characterLab') {
+            const skip=button('Omitir pelea',()=>skipCharacterLabCombat('manual'));
+            box.insertBefore(skip,stop);
+        }
         const entries=options.roster.map(id=>({roster:[id]}));
-        current.pairs=options.lanePairs
+        if(options.characterLab) {
+            current.characterLab=options.characterLab;
+            current.characterLabPairsDone=0;
+            current.characterLabOpponents=options.roster.filter(id=>id!==options.characterLab);
+            current.pairs=current.characterLabOpponents.map(id=>[
+                {roster:[options.characterLab]},{roster:[id]}]);
+        } else current.pairs=options.lanePairs
             ? options.lanePairs.map(([a,b])=>[{roster:[a]},{roster:[b]}])
             : current.uniquePairs?entries.flatMap((a,i)=>entries.slice(i+1).map(b=>[a,b]))
             : entries.flatMap((a,i)=>entries.slice(i).flatMap(b=>a===b?
@@ -658,6 +859,47 @@ function downloadStats() {
     const link=document.createElement('a');link.href=url;link.download='resultados-torneo.json';link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+function downloadCharacterLab(fighter) {
+    const report=stats.characterLabs?.[fighter];
+    if(!report)return;
+    const totalDamage=Object.values(report.damageByAttack??{}).reduce((sum,move)=>sum+move.damage,0);
+    const payload={...report,
+        latestRun:stats.characterLabLatest?.[fighter]??null,
+        percentages:{
+            guardTime:report.defense.decisionFrames?Math.round(10000*report.defense.guardFrames/report.defense.decisionFrames)/100:0,
+            attackUses:Object.fromEntries(Object.entries(report.actions??{}).filter(([name])=>
+                !['approach','guard','evade','roam'].includes(name)).map(([name,row])=>[name,row.percentOfAttacks??0])),
+            damageByAttack:Object.fromEntries(Object.entries(report.damageByAttack??{}).map(([name,row])=>
+                [name,{...row,damagePercent:totalDamage?Math.round(10000*row.damage/totalDamage)/100:0}]))
+        },
+        definitions:{attackUsePercent:'usos contados por el registro de decisiones de CPU / total de intentos de ataque',
+            guardTimePercent:'frames de decisión en los que la CPU mantuvo guardia / frames de decisión totales',
+            neverAttempted:'acciones que la estrategia de CPU tiene registradas en su catálogo explícito y no intentó; no incluye acciones manuales que la CPU todavía no sabe ejecutar'}
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2),'\n'],{type:'application/json'});
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');
+    link.href=url;link.download=`analisis-${fighter}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function openCharacterLabMenu() {
+    const d=makeDialog('Análisis individual de CPU');
+    const pool=poolList();
+    const fighter=addSelect(d,'Personaje a evaluar',pool.map(id=>[id,fighterLabel(id)]));
+    const msg=document.createElement('p');
+    msg.textContent='Juega una vez contra cada rival. El elegido va en el lado azul y usa CPU aislada. El JSON individual registra acciones intentadas, porcentajes, tiempo en guardia, bloqueos confirmados y daño por ataque.';
+    d.append(msg,button('Iniciar análisis',()=>{
+        const selected=fighter.value;d.close();
+        startTournament({kind:'characterLab',roster:pool,characterLab:selected,teamSize:1,total:1,simulate:true,concurrency:1});
+    }),button('Volver',()=>{d.close();openTournamentMenu();}));
+    d.showModal();
+}
+function openSavedCharacterLabMenu() {
+    const ids=Object.keys(stats.characterLabs??{});
+    if(!ids.length) { showReport('Aún no hay análisis individuales guardados.'); return; }
+    const d=makeDialog('Exportar análisis individual guardado');
+    const choice=addSelect(d,'Personaje',ids.map(id=>[id,fighterLabel(id)]));
+    d.append(button('Descargar JSON individual',()=>downloadCharacterLab(choice.value)),button('Cerrar',()=>d.close()));
+    d.showModal();
+}
 function makeDialog(title) {
     const d=document.createElement('dialog');d.className='tournament-dialog';
     const h=document.createElement('h2');h.textContent=title;d.append(h);
@@ -681,7 +923,7 @@ function fighterLabel(id) {
         shadow:'Shadow',knuckles:'Knuckles',tails:'Tails',silver:'Silver',chaos:'Chaos',
         emerl:'Emerl','metal-sonic':'Metal Sonic'})[id] ?? id;
 }
-function showReport(message, showLab = false) {
+function showReport(message, showLab = false, characterLab = null) {
     const d=makeDialog(message||'Resultados de la CPU');
     const data=document.createElement('pre');
     const opponent=addSelect(d,'Cruces: consultar derrotas por rival',[]);
@@ -791,7 +1033,28 @@ function showReport(message, showLab = false) {
     if (showLab && stats.roundRobinLatest) match.value='roundRobinLatest';
     else if (showLab && stats.roundRobin) match.value='roundRobin';
     match.onchange();
-    d.append(data,button('Descargar resultados JSON',downloadStats),button('Cerrar',()=>d.close()));
+    if(characterLab) {
+        const report=stats.characterLabs?.[characterLab];
+        const run=stats.characterLabLatest?.[characterLab];
+        const coverage=run?.defense?.decisionFrames?100*run.defense.guardFrames/run.defense.decisionFrames:0;
+        const top=Object.entries(run?.actions??{}).filter(([key])=>!['approach','guard','evade','roam'].includes(key))
+            .sort((a,b)=>b[1]-a[1]).slice(0,8);
+        data.textContent=[`Análisis de CPU: ${fighterLabel(characterLab)}`,
+            `Estado de esta ejecución: ${run?.status??'sin datos'} · combates: ${run?.completedMatches??run?.matches??0}/${run?.expectedMatches??'?'} · omitidos: ${run?.skippedMatches??0}`,
+            ...(run?.activeCombat?[`Combate registrado: ${run.activeCombat.blue} vs. ${run.activeCombat.red} · ${run.activeCombat.status}`]:[]),
+            ...(run?.error?[`Error: ${run.error.message}${run.error.stack?'\n'+run.error.stack:''}`]:[]),
+            ...(run?.lastCheckpoint?[`Último registro: ${run.lastCheckpoint.blue.character} ${run.lastCheckpoint.blue.state} · ${run.lastCheckpoint.blue.health} PV; ${run.lastCheckpoint.red.character} ${run.lastCheckpoint.red.state} · ${run.lastCheckpoint.red.health} PV · ${run.lastCheckpoint.elapsedSeconds}s`]:[]),
+            `Rivales enfrentados en esta ejecución: ${run?.matches??0}`,
+            `Guardia: ${run?.defense?.guardFrames??0}/${run?.defense?.decisionFrames??0} frames · ${coverage.toFixed(2)} %`,
+            `Bloqueos confirmados: ${run?.defense?.blocks??0}`,'',
+            'Ataques más usados en esta ejecución · usos / % del total de ataques',
+            ...top.map(([name,uses])=>`${MOVE_LABELS[name]??name}: ${uses} · ${run?.attackAttempts? (100*uses/run.attackAttempts).toFixed(2):'0.00'} %`),
+            '',`Ataques de la estrategia CPU sin intento (acumulado): ${!report?.cpuStrategyMoveCatalog?.length?'este personaje aún no tiene catálogo de acciones de CPU definido':report.neverAttempted?.length?report.neverAttempted.map(name=>MOVE_LABELS[name]??name).join(', '):'ninguno según el catálogo registrado'}`,
+            '',`Acumulado histórico: ${report?.matches??0} combates · ${report?.wins??0} G / ${report?.losses??0} P / ${report?.draws??0} E`].join('\n');
+    }
+    d.append(data,
+        ...(characterLab?[button(`Descargar análisis ${characterLab}.json`,()=>downloadCharacterLab(characterLab))]:[]),
+        button('Descargar resultados JSON',downloadStats),button('Cerrar',()=>d.close()));
     d.showModal();
 }
 
@@ -886,7 +1149,9 @@ export function openTournamentMenu() {
             total:n,playerRoster,simulate:mode.value==='simulate'};
         d.close();
         startTournament(options);
-    }),button('Todos contra todos',()=>{d.close();openRoundRobinMenu();}),
+    }),button('Análisis por personaje',()=>{d.close();openCharacterLabMenu();}),
+    button('Exportar análisis guardado',()=>{d.close();openSavedCharacterLabMenu();}),
+    button('Todos contra todos',()=>{d.close();openRoundRobinMenu();}),
     button('Datos de CPU',()=>{d.close();showReport();}),button('Volver',()=>d.close()));
     update();d.showModal();
 }

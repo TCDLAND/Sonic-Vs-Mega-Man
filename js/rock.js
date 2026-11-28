@@ -823,7 +823,17 @@ class RockBomb{
   if(!this.resting&&this.vy>=0&&next>=surface){this.y+=surface-next;this.vx=0;this.vy=0;this.resting=true;}
   if(this.resting){const bottom=this._bottom();const supported=bottom>=this.owner.feetY-.5||this.owner.concretes.some(c=>{if(!c.isPlatform())return false;const r=c.platformRect;return this.x-16*this.scale+b.right*this.scale>r.x&&this.x-16*this.scale+b.left*this.scale<r.x+r.w&&Math.abs(bottom-r.y)<2;});if(!supported){this.resting=false;this.vy=.55*this.scale;}}
   if(this.age>280)this.explode();
-  for(const f of this.owner.fireEffects)if(f.active&&Math.abs(f.x-this.x)<23*this.scale&&Math.abs(f.y-this.y)<40*this.scale)this.explode();
+  const combatants=[game.p1,game.p2,...(game.teamFighters?.p1??[]),...(game.teamFighters?.p2??[])].filter(Boolean);
+  const bombL=this.x-16*this.scale,bombR=this.x+16*this.scale,bombT=this.y-32*this.scale,bombB=this.y;
+  for(const source of new Set(combatants)) {
+   for(const f of source.fireEffects??[]) {
+    if(!f.active)continue;
+    const radiusX=(f.kind==='ground'?32:24)*(f.scale||this.scale),radiusY=(f.kind==='ground'?36:28)*(f.scale||this.scale);
+    if(Math.abs(f.x-this.x)<radiusX+16*this.scale&&Math.abs(f.y-this.y)<radiusY+16*this.scale){this.explode();return;}
+   }
+  }
+  for(const shot of game.projectiles??[])if(shot.active&&shot.element==='fire'&&shot.owner!==this.owner&&
+   shot.x<bombR&&shot.x+shot.width>bombL&&shot.y<bombB&&shot.y+shot.height>bombT){this.explode();return;}
  }
  tryHit(t){if(!t)return;const d=Math.hypot(t.x+t.width/2-this.x,t.y+t.height/2-this.y);if(this.blast&&d<95*this.scale&&!this.hit.has(t)){this.hit.add(t);const strength=Math.max(0,1-d/(95*this.scale));dealDamage(t,Math.round(5+19*strength),{attacker:this.owner,attackName:'Hyper Bomb',impactX:this.x});if(!t.lastGuardImpact?.front){const side=(t.x+t.width/2>=this.x?1:-1);t.vx=side*(5+21*strength);t.vy=-(5+17*strength);t.isGrounded=false;t.wasInAirFromKnockback=true;t.knockbackAirTimer=0;}}}
  draw(){const w=32*this.scale,h=32*this.scale;drawGreen(BOMB_IMG,this.blast?2:this._frame(),32,32,this.x-w/2-game.cameraX,this.y-h,w,h,false,this.blast?Math.max(.15,1-this.age/16):.83+.17*Math.sin(this.age*.38));}
@@ -1228,7 +1238,7 @@ export class Rock extends PrototypeFighter {
   const pivotWorldX=this.x+this.width/2,pivotWorldY=this.y+this.height;
   const dx=pivotWorldX-s.pivotX*scale,dy=pivotWorldY-s.pivotY*scale;
   const flip=(this.facingDirection!==s.sourceFacing); // source=-1; mirando derecha => flip.
-  return {img:key==='flamesword'?s.img:recolored(s.img,this._paletteIndex()),sx:s.start+fi*(s.cw+s.gap),sy:0,sw,sh,dx,dy,dw,dh,flipX:flip,key,frame:fi,scale};
+  return {img:key==='flamesword'?s.img:recolored(s.img,this._paletteIndex()),collisionImg:s.img,sx:s.start+fi*(s.cw+s.gap),sy:0,sw,sh,dx,dy,dw,dh,flipX:flip,key,frame:fi,scale};
  }
  _frame(){const [key,fi]=this._anim();return this._frameFor(key,fi);}
  getPixelBodyFrame(){return this._frame();}
@@ -1240,7 +1250,7 @@ export class Rock extends PrototypeFighter {
   for(const c of this.concretes)c.tryHit(receiver);
   for(const fx of this.fireEffects)fx.tryHit(receiver);
   for(const b of this.bombs)b.tryHit(receiver);for(const sn of this.snakes)sn.tryHit(receiver);this.leafShield?.tryHit(receiver);
-  if(this.swordCasting&&!this.swordHit){const e=combatNow()-this.swordCastAt;if(e>=70&&e<360){const body=this._frame();const target=receiver?.getPixelBodyFrame?.(this.x+this.width/2);if(body&&target){const sword={...body,img:SWORD_FX};if(opaqueFramesOverlap(sword,target,null,1)){const damage=dealDamage(receiver,12,{attacker:this,attackName:'Flame Sword',element:'fire',impactX:this.x+this.width/2,impactY:this.y+this.height*.45});if(damage>0&&!receiver.lastGuardImpact?.front)fireKnock(receiver,this.facingDirection,'column');this.swordHit=true;}}}}
+  if(this.swordCasting&&!this.swordHit){const e=combatNow()-this.swordCastAt;if(e>=70&&e<360){const body=this._frame();const target=receiver?.getPixelBodyFrame?.(this.x+this.width/2);if(body&&target){const sword={...body,img:SWORD_FX,collisionImg:SWORD_FX};if(opaqueFramesOverlap(sword,target,null,1)){const damage=dealDamage(receiver,12,{attacker:this,attackName:'Flame Sword',element:'fire',impactX:this.x+this.width/2,impactY:this.y+this.height*.45});if(damage>0&&!receiver.lastGuardImpact?.front)fireKnock(receiver,this.facingDirection,'column');this.swordHit=true;}}}}
   if(!receiver||!this.slashActive||this.slashHit)return;
   const elapsed=combatNow()-this.slashStartedAt;if(elapsed<170||elapsed>=255)return; // frame 3 (indice 2)
   const f=this._frame();if(!f)return;

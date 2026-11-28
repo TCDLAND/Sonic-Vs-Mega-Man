@@ -1,7 +1,8 @@
 import { canvas, game } from './state.js';
 import { GAME_STATE } from './config.js';
 import { battleStages, chooseBattleStage, normalizeRoundSeconds } from './battle-stages.js';
-import { startBattle } from './battle.js?v=online-3v3-2';
+import { startBattle } from './battle.js?v=palette-system-1';
+import { getSelectionPalette } from './character-palettes.js?v=palette-exact-4';
 
 const P1_TO_P2 = {
     KeyA: 'ArrowLeft', KeyD: 'ArrowRight', KeyW: 'ArrowUp', KeyS: 'ArrowDown',
@@ -41,6 +42,7 @@ function setUpOnlineGame(localRole) {
     game.mode = 'online';
     game.controlOverrides = null;
     game.teamRosters = teamSize===3 ? [[],[]] : null;
+    game.teamPaletteRosters = teamSize===3 ? [[],[]] : null;
     stagePickerOpened = false;
     game.characterSelection.p1Index = game.characterSelection.p1Index ?? 0;
     game.characterSelection.p2Index = game.characterSelection.p2Index ?? 1;
@@ -55,7 +57,8 @@ function setUpOnlineGame(localRole) {
 function sendSelectionState(reset = false) {
     const s = game.characterSelection;
     send({ type: 'selection-state', p1Index: s.p1Index, p2Index: s.p2Index,
-        p1Confirmed: s.p1Confirmed, p2Confirmed: s.p2Confirmed, rosters: game.teamRosters, reset });
+        p1Confirmed: s.p1Confirmed, p2Confirmed: s.p2Confirmed, p1Palette:s.p1Palette,p2Palette:s.p2Palette,
+        rosters: game.teamRosters, paletteRosters:game.teamPaletteRosters, reset });
 }
 
 function maybeChooseStage() {
@@ -65,13 +68,14 @@ function maybeChooseStage() {
     setStatus('Ambos listos · Jugador 1 elige escenario');
     chooseBattleStage(game, () => {
         send({ type: 'battle-start', stageId: game.battleStage?.id,
-            seconds: game.selectedRoundSeconds, rosters: game.teamRosters,
+            seconds: game.selectedRoundSeconds, rosters: game.teamRosters,paletteRosters:game.teamPaletteRosters,
+            p1Palette:game.characterSelection.p1Palette,p2Palette:game.characterSelection.p2Palette,
             p1Index: game.characterSelection.p1Index, p2Index: game.characterSelection.p2Index });
         startBattle();
         setStatus(`En línea ${teamSize}v${teamSize} · Código para espectadores: ${roomCode}`);
     }, () => {
         stagePickerOpened = false;
-        if (teamSize===3) game.teamRosters = [[],[]];
+        if (teamSize===3) { game.teamRosters = [[],[]];game.teamPaletteRosters=[[],[]]; }
         sendSelectionState(true);
     });
 }
@@ -238,10 +242,15 @@ function handleHostMessage(message) {
     } else if (message.type === 'selection') {
         const s = game.characterSelection;
         s.p2Index = Math.max(0, Math.min(s.chars.length - 1, Number(message.index) || 0));
+        s.p2Palette=message.palette===1?1:0;
         if (teamSize===3) {
             game.teamRosters[1] = validRoster(message.roster);
+            game.teamPaletteRosters[1] = validPaletteRoster(message.paletteRoster,game.teamRosters[1].length);
             s.p2Confirmed = game.teamRosters[1].length===3;
-        } else s.p2Confirmed = Boolean(message.confirmed);
+        } else {
+            s.p2Confirmed = Boolean(message.confirmed);
+            if(s.p2Confirmed&&s.p1Confirmed&&s.chars[s.p1Index]===s.chars[s.p2Index]&&s.p1Palette===s.p2Palette)s.p2Palette=s.p1Palette^1;
+        }
         sendSelectionState();
         maybeChooseStage();
     } else if (message.type === 'input' && typeof message.code === 'string') {
@@ -263,8 +272,10 @@ function handleGuestMessage(message) {
         if (message.reset) s.p2Confirmed = false;
         if (teamSize===3) {
             game.teamRosters[0] = validRoster(message.rosters?.[0]);
-            if (message.reset) game.teamRosters[1] = [];
+            game.teamPaletteRosters[0]=validPaletteRoster(message.paletteRosters?.[0],game.teamRosters[0].length);
+            if (message.reset) { game.teamRosters[1] = [];game.teamPaletteRosters[1]=[]; }
         }
+        s.p1Palette=message.p1Palette===1?1:0;s.p2Palette=message.p2Palette===1?1:0;
     } else if (message.type === 'battle-start') {
         const stage = battleStages.find(item => item.id === message.stageId);
         if (!stage) { setStatus('El anfitrión eligió un escenario que no cargó en esta versión.'); return; }
@@ -272,11 +283,14 @@ function handleGuestMessage(message) {
             const rosters = [validRoster(message.rosters?.[0]),validRoster(message.rosters?.[1])];
             if (rosters.some(roster=>roster.length!==3)) return;
             game.teamRosters = rosters;
+            game.teamPaletteRosters=[validPaletteRoster(message.paletteRosters?.[0],3),validPaletteRoster(message.paletteRosters?.[1],3)];
         }
         game.battleStage = stage;
         game.selectedRoundSeconds = normalizeRoundSeconds(message.seconds);
         game.characterSelection.p1Index = message.p1Index;
         game.characterSelection.p2Index = message.p2Index;
+        game.characterSelection.p1Palette=message.p1Palette===1?1:0;
+        game.characterSelection.p2Palette=message.p2Palette===1?1:0;
         startBattle();
         setStatus('En línea · usa tu WASD y JIKM para manejar al Jugador 2');
     } else if (message.type === 'input' && typeof message.code === 'string') {
@@ -290,6 +304,9 @@ function validRoster(roster) {
     if (!Array.isArray(roster)) return [];
     const chars = game.characterSelection.chars;
     return [...new Set(roster.filter(id=>chars.includes(id)))].slice(0,3);
+}
+function validPaletteRoster(roster,length) {
+    return Array.from({length},(_,index)=>roster?.[index]===1?1:0);
 }
 
 function dispatchKey(type, code, sequence, slot) {
@@ -354,11 +371,17 @@ export function routeOnlineKey(event) {
 
 export function handleOnlineSelectionKey(event) {
     if (game.mode !== 'online' || !['host', 'guest'].includes(role) || game.gameState !== GAME_STATE.SELECT) return false;
-    if (event.repeat || !['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyJ'].includes(event.code)) return true;
+    if (event.repeat || !['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyJ','KeyI'].includes(event.code)) return true;
     event.preventDefault();
     const s = game.characterSelection;
     const side = role === 'host' ? 'p1' : 'p2';
     const indexKey = `${side}Index`, confirmedKey = `${side}Confirmed`;
+    if(event.code==='KeyI'){
+        if(!s[confirmedKey])s[side+'Palette']=getSelectionPalette(s,side)^1;
+        if(role==='host')sendSelectionState();
+        else send({type:'selection',index:s.p2Index,confirmed:s.p2Confirmed,palette:s.p2Palette,roster:game.teamRosters?.[1],paletteRoster:game.teamPaletteRosters?.[1]});
+        return true;
+    }
     if (s[confirmedKey]) return true;
     const i = s[indexKey], row = Math.floor(i / 4), col = i % 4;
     const count = s.chars.length, rows = Math.ceil(count / 4);
@@ -377,15 +400,23 @@ export function handleOnlineSelectionKey(event) {
         if (teamSize===3) {
             const roster = game.teamRosters[side==='p1'?0:1];
             const fighter = s.chars[s[indexKey]];
-            if (!roster.includes(fighter)) roster.push(fighter);
+            if (!roster.includes(fighter)) {
+                let palette=getSelectionPalette(s,side);
+                const otherIndex=game.teamRosters[side==='p1'?1:0].indexOf(fighter);
+                if(otherIndex>=0&&game.teamPaletteRosters?.[side==='p1'?1:0]?.[otherIndex]===palette)palette^=1;
+                roster.push(fighter);game.teamPaletteRosters[side==='p1'?0:1].push(palette);
+            }
             s[confirmedKey] = roster.length===3;
-        } else s[confirmedKey] = true;
+        } else {
+            s[side+'Palette']=getSelectionPalette(s,side);
+            s[confirmedKey] = true;
+        }
     }
 
     if (role === 'host') {
         sendSelectionState();
         maybeChooseStage();
-    } else send({ type: 'selection', index: s.p2Index, confirmed: s.p2Confirmed, roster: game.teamRosters?.[1] });
+    } else send({ type: 'selection', index: s.p2Index, confirmed: s.p2Confirmed,palette:s.p2Palette, roster: game.teamRosters?.[1],paletteRoster:game.teamPaletteRosters?.[1] });
     return true;
 }
 

@@ -1,6 +1,6 @@
 import { drawCombatHud, tickReserveHealth } from './combat-hud.js';
 import { pollXboxPads } from './xbox-pad.js';
-import { tickAssistKeys } from './input.js?v=knuckles-moves-3';
+import { tickAssistKeys } from './input.js?v=palette-system-1';
 import { drawTeamAssists, tickTeamAssists, interceptTeamAssist } from './team-assists.js';
 import { drawWind, emitWind } from './wind-effects.js';
 import { pollStagePad } from './battle-stages.js';
@@ -18,18 +18,25 @@ import { combatNow, setSimulatedCombatTime } from './combat-clock.js';
 
 import { worldWidth, GAME_STATE } from './config.js';
 import { game, ctx, canvas, tongueCtx } from './state.js';
+import { withCharacterPalette } from './character-palettes.js?v=palette-exact-4';
 import { storyStage, showStoryResult, pollStoryPad } from './story-mode.js';
 import { bgImage, trebleSprite1, bassSprite3 } from './assets.js';
 import { drawSelectionScreen } from './selection.js';
 import { drawCountdown, drawModeScreen, drawResultScreen } from './menu-screen.js?v=online-3v3-2';
-import { setupInput } from './input.js?v=knuckles-moves-3';
-import { switchTeamFighter } from './battle.js?v=team3-1';
+import { setupInput } from './input.js?v=palette-system-1';
+import { switchTeamFighter } from './battle.js?v=palette-system-1';
 import { getCellCoords } from './utils.js';
 import { drawTrebleFrame, TREBLE_BULLET_IMPACT_A, TREBLE_BULLET_IMPACT_B } from './bass.js';
 import { dealDamage, DEBUG_COMBAT } from './combat-system.js';
-import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, startTournament, cancelTournament, tournamentRunning, skipCurrentSimulationCombat } from './tournament.js?v=round-robin-unique-pairs-1';
+import { tournamentSimulationActive, tournamentSimulationPaused, tournamentResult, interruptTournamentSimulation, sampleTournamentMemory, sampleCharacterLabCombat, startTournament, cancelTournament, tournamentRunning, skipCurrentSimulationCombat } from './tournament.js?v=character-lab-render-5';
 import { HIGHWAY_WALLS, landOnStagePlatform } from './wall-system.js';
 import { checkSonicDashAttack, checkSonicRocketAttack } from './sonic.js';
+function visiblePaletteIndex(fighter) {
+    return fighter.superEndsAt != null && combatNow() < fighter.superEndsAt ? 0 : fighter.paletteIndex;
+}
+function drawFighterWithPalette(fighter, opponentX) {
+    return withCharacterPalette(fighter.characterId, visiblePaletteIndex(fighter), () => fighter.draw(opponentX));
+}
 import {
     checkJabCollision, checkHeavyCollision,
     checkKickLightCollision, checkKickHeavyCollision,
@@ -255,7 +262,7 @@ function drawTagEffects(now) {
             ctx.save();
             ctx.globalAlpha = 1-phase;
             ctx.translate(worldX-effect.outgoing.x,0);
-            effect.outgoing.draw(rival.x);
+            withCharacterPalette(effect.outgoing.characterId,visiblePaletteIndex(effect.outgoing),()=>effect.outgoing.draw(rival.x));
             ctx.restore();
         }
         const color = effect.side === 'p1' ? '#28aaff' : '#ff3e65';
@@ -508,7 +515,7 @@ function gameLoop(time = performance.now(), render = true) {
         if (canFight && !p1.shadowFrozenBy && !p2.shadowFrozenBy) { updateEggAssists(); updateEggmanSupports(); tickTeamAssists(); }
         game.projectiles.forEach((proj) => {
             if (!proj.active) return;
-            if (render) proj.draw(game.cameraX);
+            if (render) withCharacterPalette(proj.owner?.characterId,visiblePaletteIndex(proj.owner||{}),()=>proj.draw(game.cameraX));
             if (proj.collisionDisabled) return;
             const target = projectileOpponent(proj.owner, p1, p2);
             if (target?.interceptFlyingShield?.(proj)) return;
@@ -538,7 +545,7 @@ function gameLoop(time = performance.now(), render = true) {
 
         game.bassBullets.forEach((bullet) => {
             if (!bullet.active) return;
-            if (render) bullet.draw(game.cameraX);
+            if (render) withCharacterPalette(bullet.owner?.characterId,visiblePaletteIndex(bullet.owner||{}),()=>bullet.draw(game.cameraX));
             const target = projectileOpponent(bullet.owner, p1, p2);
             if (target?.interceptFlyingShield?.(bullet)) return;
             if (target && (handleSilverAssistShot(bullet,target) || interceptTeamAssist(bullet,target) || target.interceptSilverShot?.(bullet))) return;
@@ -599,17 +606,18 @@ function gameLoop(time = performance.now(), render = true) {
         const p1Grab = p1.characterId === 'knuckles' && p1.grabConnected && p1.grabTarget === p2;
         const p2Grab = p2.characterId === 'knuckles' && p2.grabConnected && p2.grabTarget === p1;
         if (p1Grab) {
-            if (p1.grabDrawInFront()) { p2.draw(p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); p1.draw(p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); }
-            else { p1.draw(p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); p2.draw(p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); }
+            if (p1.grabDrawInFront()) { drawFighterWithPalette(p2,p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); drawFighterWithPalette(p1,p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); }
+            else { drawFighterWithPalette(p1,p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); drawFighterWithPalette(p2,p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); }
         } else if (p2Grab) {
-            if (p2.grabDrawInFront()) { p1.draw(p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); p2.draw(p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); }
-            else { p2.draw(p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); p1.draw(p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); }
+            if (p2.grabDrawInFront()) { drawFighterWithPalette(p1,p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); drawFighterWithPalette(p2,p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); }
+            else { drawFighterWithPalette(p2,p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x); drawFighterWithPalette(p1,p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x); }
         } else {
-            if (!isTagArrivalHidden('p1', p1, combatNow())) (p1.shadowFrozenBy ? drawChaosFrozen(p1,p2.x) : p1.draw(p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x));
-            if (!isTagArrivalHidden('p2', p2, combatNow())) (p2.shadowFrozenBy ? drawChaosFrozen(p2,p1.x) : p2.draw(p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x));
+            if (!isTagArrivalHidden('p1', p1, combatNow())) (p1.shadowFrozenBy ? withCharacterPalette(p1.characterId,visiblePaletteIndex(p1),()=>drawChaosFrozen(p1,p2.x)) : drawFighterWithPalette(p1,p1.getVisualOpponentX ? p1.getVisualOpponentX(p2.x) : p2.x));
+            if (!isTagArrivalHidden('p2', p2, combatNow())) (p2.shadowFrozenBy ? withCharacterPalette(p2.characterId,visiblePaletteIndex(p2),()=>drawChaosFrozen(p2,p1.x)) : drawFighterWithPalette(p2,p2.getVisualOpponentX ? p2.getVisualOpponentX(p1.x) : p1.x));
         }
         // Tormenta fuera del radio, dibujada por encima del escenario.
-        p1.drawChaosStorm?.();p2.drawChaosStorm?.();
+        withCharacterPalette(p1.characterId,visiblePaletteIndex(p1),()=>p1.drawChaosStorm?.());
+        withCharacterPalette(p2.characterId,visiblePaletteIndex(p2),()=>p2.drawChaosStorm?.());
         drawTrebles();
         drawTrebleBullets();
         drawTagEffects(combatNow());
@@ -724,6 +732,7 @@ function frameDriver(time) {
             for(let i=0;i<(render?6:4) && tournamentSimulationActive();i++) {
                 setSimulatedCombatTime(combatNow()+1000/60);
                 gameLoop(time,render);
+                sampleCharacterLabCombat();
                 if(performance.now()>=deadline) break;
             }
         } catch (error) {

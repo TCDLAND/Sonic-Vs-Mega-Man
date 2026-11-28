@@ -143,7 +143,10 @@ export class Espio extends Fighter {
         move.hit = true;
         const names = { smoke:'Corte entre humo', drill:'Trompo ninja', tornado:'Tornado ninja' };
         dealDamage(target,damage,{attacker:this,attackName:names[move.kind],impactX:this.x+this.width/2,
-            lowAttack:move.kind==='drill', ignoreGuard:move.kind==='drill' && target.guardType==='high',
+            lowAttack:move.kind==='drill',
+            // El trompo ninja es un ataque bajo: castiga la guardia de pie,
+            // pero sigue siendo bloqueable agachándose o esquivándolo.
+            ignoreGuard:move.kind==='drill' && target.isGuarding && target.guardType==='high',
             damageCategory:move.kind==='tornado'?'técnica':'cuerpo a cuerpo'});
         if (move.kind === 'tornado' && !target.lastGuardImpact?.front) {
             target.vy = -10;

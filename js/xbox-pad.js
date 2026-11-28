@@ -55,7 +55,7 @@ export function pollXboxPads() {
         const mapping=[[directions[0],k.left],[directions[1],k.right],[directions[2],k.up],
             [down,k.down],[battle&&b(5),k.aux1],[battle&&b(8),k.aux2],
             [battle&&((b(7)&&!(down&&fighter?.supportsSpin))||(spinFace&&down&&!crouchAttack)),k.spin],[battle&&b(4),`p${i+1}:reserve:0`],[battle&&b(6),`p${i+1}:reserve:1`],
-            [battle?b(2):b(0),k.attack],[battle&&b(3),k.heavy],[battle&&b(0)&&(!spinFace||crouchAttack),k.light],
+            [battle?b(2):b(0),k.attack],[b(3),k.heavy],[battle&&b(0)&&(!spinFace||crouchAttack),k.light],
             [battle&&b(1),k.kick],[b(9)&&i===0,'Escape'],[!battle&&b(3)&&i===0,'KeyG']];
         for(const [on,code] of mapping) if (on) pressed.set(code,device);
     });

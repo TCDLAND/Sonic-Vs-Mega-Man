@@ -6,7 +6,9 @@ const cvs = document.createElement('canvas');
 const cctx = cvs.getContext('2d', { willReadFrequently: true });
 
 function alphaData(frame) {
-  const img = frame?.img;
+  // Collision masks always come from the immutable source art. A visual
+  // palette canvas may change RGB values, but must never affect pixel-perfect hits.
+  const img = frame?.collisionImg || frame?.img;
   if (!img || frame.sw <= 0 || frame.sh <= 0) return null;
   const isCanvas = img instanceof HTMLCanvasElement;
   // Las variantes de paleta se guardan como lienzos en lugar de imágenes.

@@ -18,7 +18,7 @@ import { Zero } from './zero.js';
 import { Rock } from './rock.js';
 import { Knuckles } from './knuckles.js?v=knuckles-moves-3';
 import { Bass, Treble } from './bass.js';
-import { startBattle, returnToCharacterSelect, switchTeamFighter, chooseTrainingTeams } from './battle.js?v=team3-1';
+import { startBattle, returnToCharacterSelect, switchTeamFighter, chooseTrainingTeams } from './battle.js?v=palette-system-1';
 import { BusterProjectile, getBusterLevel } from './buster-system.js';
 import { getTouchedWall } from './wall-system.js';
 import { selectionIndexAt, canRandomizeSelection, randomSelectionAt } from './selection.js';
@@ -28,7 +28,8 @@ import { requestTeamAssist } from './team-assists.js';
 import { handleChaosPuddleKey, handleChaosPuddlePointer } from './chaos.js';
 import { isBattleHelpOpen, toggleBattlePause } from './pause-menu.js?v=knuckles-moves-3';
 import { openCharacterGuide, isCharacterGuideOpen, guideButtonAt } from './character-guide.js';
-import { openOnlineLobby, handleOnlineSelectionKey, releaseOnlineInputs, routeOnlineKey } from './online.js?v=online-controls-1';
+import { openOnlineLobby, handleOnlineSelectionKey, releaseOnlineInputs, routeOnlineKey } from './online.js?v=palette-system-1';
+import { getSelectionPalette } from './character-palettes.js?v=palette-exact-4';
 
 function isHumanInputForCpu(event) {
     if (!event.isTrusted && !event.gamepadInput) return false;
@@ -79,7 +80,7 @@ function handleBasicCombo(fighter, code) {
 
 function startRandomBattle() {
     const [blue, red] = chooseTrainingTeams();
-    if (game.mode === 'team') game.teamRosters = [blue, red];
+    if (game.mode === 'team') { game.teamRosters = [blue, red]; game.teamPaletteRosters=[blue.map(()=>0),red.map(()=>0)]; }
     const s = game.characterSelection;
     s.p1Index = s.chars.indexOf(blue[0]);
     s.p2Index = s.chars.indexOf(red[0]);
@@ -93,11 +94,30 @@ function confirmFighter(side) {
     if (game.mode === 'team') {
         const roster = game.teamRosters[side === 'p1' ? 0 : 1];
         const id = selection.chars[selection[side + 'Index']];
-        if (game.teamRosters.some(team => team.includes(id))) return;
+        if (roster.includes(id)) return;
+        const otherIndex = game.teamRosters[side === 'p1' ? 1 : 0].indexOf(id);
+        let palette = getSelectionPalette(selection,side);
+        const otherPalette = game.teamPaletteRosters?.[side === 'p1' ? 1 : 0]?.[otherIndex];
+        if (otherIndex >= 0 && otherPalette === palette) palette ^= 1;
         roster.push(id);
+        game.teamPaletteRosters[side === 'p1' ? 0 : 1].push(palette);
         if (roster.length < 3) return;
+    } else {
+        const other = side === 'p1' ? 'p2' : 'p1';
+        const id = selection.chars[selection[side + 'Index']];
+        const otherId = selection.chars[selection[other + 'Index']];
+        selection[side+'Palette']=getSelectionPalette(selection,side);
+        if (selection[other + 'Confirmed'] && id === otherId &&
+            selection[side + 'Palette'] === selection[other + 'Palette']) {
+            selection[side + 'Palette'] = selection[other + 'Palette'] ^ 1;
+        }
     }
     selection[side + 'Confirmed'] = true;
+}
+
+function toggleSelectionPalette(side) {
+    const s=game.characterSelection;
+    if (!s[side+'Confirmed']) s[side+'Palette'] = getSelectionPalette(s,side) ^ 1;
 }
 
 function chooseMode(index) {
@@ -109,6 +129,7 @@ function chooseMode(index) {
     game.mode = ['cpu', 'local', 'team', 'story', 'practice'][index];
     game.gameState = GAME_STATE.SELECT;
     game.teamRosters = [[], []];
+    game.teamPaletteRosters = [[], []];
     game.characterSelection.p1Confirmed = false;
     game.characterSelection.p2Confirmed = false;
 }
@@ -205,6 +226,8 @@ export function setupInput() {
         // ============================
         if (game.gameState === GAME_STATE.SELECT) {
             if (handleOnlineSelectionKey(e)) return;
+            if (e.code === 'KeyI' && !e.repeat) toggleSelectionPalette('p1');
+            if (e.code === 'Period' && !e.repeat) toggleSelectionPalette('p2');
             if (e.code === 'KeyR' && !e.repeat && canRandomizeSelection()) {
                 startRandomBattle();
                 return;

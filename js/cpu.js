@@ -84,6 +84,8 @@ export class CpuFighter {
         this.actionCounts = {};
         this.hitsThisMatch = 0;
         this.blocksThisMatch = 0;
+        this.decisionFramesThisMatch = 0;
+        this.guardFramesThisMatch = 0;
         this.repeatPenalties = 0;
         this.lastHitAt = 0;
         this.lastRewardText = 'Ajustando estrategia';
@@ -102,6 +104,7 @@ export class CpuFighter {
         this.rockComboPhase = 'idle';
         this.rockComboAt = 0;
         this.rockConcreteRef = null;
+        this.rockConcreteReadyAt = 0;
     }
 
     random() {
@@ -177,12 +180,17 @@ export class CpuFighter {
         };
         const code = keyByAction[action];
         if (!code) return;
+        this.tapKey(code, fighter);
+    }
+
+    tapKey(code, fighter, duration = 90) {
+        if (!code) return;
         window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
         window.setTimeout(() => {
             const stillControls = (game.p1 === fighter && game.cpuAgentP1 === this) ||
                 (game.p2 === fighter && game.cpuAgentP2 === this);
             if (stillControls && !game.paused) window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
-        }, 90);
+        }, duration);
     }
 
     recordAction(action) {
@@ -372,7 +380,7 @@ export class CpuFighter {
             if (player.characterId === 'bass' && !cpu.isGrounded && distance < 360 &&
                 cpu.activeRush?.lastCommand === 'coil' && now < this.characterCooldownUntil) {
                 cpu.selectWeaponSet('cut_concrete');
-                if (cpu.startRollingCutter('lower')) { this.recordAction('rock_concrete'); return true; }
+                if (cpu.startRollingCutter('lower')) { cpu.weaponSet='base'; this.recordAction('rock_cutter'); return true; }
             }
             if (player.characterId === 'bass' && now >= this.characterCooldownUntil) {
                 if (distance < 230 && cpu.startRushCoil()) {
@@ -385,10 +393,15 @@ export class CpuFighter {
                 if (distance > 450 && cpu.startRushJet(towardRight ? 1 : -1)) {
                     wait(2400); return true;
                 }
-                if (distance > 300 && !cpu.concretes.some(item => item.active && item.kind !== 'moving') &&
-                    cpu.weaponAmmo?.cut_concrete >= 22) {
+                if (distance > 300 && !cpu.concretes.some(item => item.active && item.isPlatform?.() && item.kind !== 'moving') &&
+                    cpu.weaponAmmo?.cut_concrete >= 22 && now >= this.rockConcreteReadyAt && this.random()<.12) {
                     cpu.selectWeaponSet('cut_concrete');
-                    if (cpu.startConcrete('build_far')) { wait(850); return true; }
+                    if (cpu.startConcrete('build_far')) {
+                        this.rockConcreteReadyAt=now+14000;
+                        cpu.weaponSet='base';
+                        this.rockConcreteRef=cpu.concretes.at(-1);
+                        this.recordAction('rock_concrete'); wait(1150); return true;
+                    }
                 }
             }
             if (now < this.characterCooldownUntil) {
@@ -429,42 +442,97 @@ export class CpuFighter {
             }
             if (player.characterId === 'bass' && distance > 235 && distance < 950 &&
                 this.chargeBusterAgainstBass(cpu, player, now)) return true;
-            if (distance < 180 && cpu.weaponAmmo?.cut_concrete > 10) {
+            const direction = towardRight ? 1 : -1;
+            const activePlatform = cpu.concretes.some(item => item.active && item.isPlatform?.() && item.kind !== 'moving');
+            const rivalOnRockPlatform = cpu.concretes.some(item => {
+                if (!item.active || !item.isPlatform?.()) return false;
+                const r=item.platformRect;
+                return Math.abs(player.y+player.height-r.y)<20 && player.x+player.width>r.x && player.x<r.x+r.w;
+            });
+            const rivalAbove = !player.isGrounded || player.y+player.height < cpu.y+cpu.height-65;
+
+            // Concrete es una decisión de terreno ocasional: no repetir el ciclo
+            // muro -> plataforma móvil ni colocar otro muro si ya hay plataforma.
+            const buildOpportunity = !activePlatform && now >= this.rockConcreteReadyAt &&
+                distance >= 285 && distance <= 610 && cpu.isGrounded &&
+                (rivalAbove || (distance > 440 && hasIncomingProjectile(player,cpu))) && this.random() < .18;
+            if (buildOpportunity && cpu.weaponAmmo?.cut_concrete >= 22) {
                 if (cpu.weaponSet !== 'cut_concrete') cpu.selectWeaponSet('cut_concrete');
-                if (cpu.startRollingCutter(player.y < cpu.y - 25 ? 'upper' : 'lower')) { this.recordAction('rock_concrete'); wait(1100); return true; }
+                if (cpu.startConcrete('build_far')) {
+                    this.rockConcreteRef=cpu.concretes.at(-1);
+                    this.rockConcreteReadyAt=now+14000;
+                    // Deja el modo normal disponible sin destruir la plataforma recién creada.
+                    cpu.weaponSet='base';
+                    this.recordAction('rock_concrete'); wait(1150); return true;
+                }
             }
-            if (!player.isGrounded && distance < 285 && cpu.weaponAmmo?.fire >= 12 && now >= this.characterCooldownUntil) {
-                if (cpu.weaponSet !== 'fire') cpu.selectWeaponSet('fire');
-                if (cpu.startFlameSword()) { this.recordAction('rock_fire'); wait(1500); return true; }
-            }
-            if (distance >= 180 && distance <= 720 && cpu.weaponAmmo?.cut_concrete >= 22 && now >= this.characterCooldownUntil) {
-                if (cpu.weaponSet !== 'cut_concrete') cpu.selectWeaponSet('cut_concrete');
-                const fixed = cpu.concretes.find((item) => item.active && item.kind === 'build_far' && item.state === 'solid');
-                if (!fixed) {
-                    if (cpu.startConcrete('build_far')) { this.rockConcreteRef = cpu.concretes.at(-1); this.rockComboPhase = 'waiting'; this.recordAction('rock_concrete'); wait(900); }
+
+            // Si el rival usa la propia plataforma de Rock, subir a disputar la
+            // altura; si ya comparten nivel, atacar en vez de quedarse mirando.
+            if (rivalOnRockPlatform && distance > 115 && cpu.isGrounded && now >= this.characterCooldownUntil) {
+                const sameElevation=Math.abs((cpu.y+cpu.height)-(player.y+player.height))<30;
+                if(!sameElevation) {
+                    this.setMovement(cpu,direction<0,direction>0,false,true);
                     return true;
                 }
-                const moving = cpu.concretes.some((item) => item.active && item.kind === 'moving');
-                if (!moving && cpu.startConcrete('moving')) { this.rockComboPhase = 'idle'; this.recordAction('rock_concrete'); wait(1600); return true; }
             }
-            if (distance > 360 && cpu.weaponAmmo?.fire > 18 && now >= this.characterCooldownUntil) {
+            if (distance < 155 && cpu.isGrounded && now >= this.characterCooldownUntil) {
+                const useJab=this.random()<.48;
+                if(useJab) {
+                    cpu.startJab();
+                    if(cpu.isJabActive){this.recordAction('jab');wait(520);return true;}
+                } else {
+                    cpu.startHeavy();
+                    if(cpu.isHeavyActive){this.recordAction('heavy');wait(650);return true;}
+                }
+                if (cpu.startSlashClaw()) { this.recordAction('heavy'); wait(700); return true; }
+            }
+            if (distance < 320 && cpu.isGrounded && now >= this.characterCooldownUntil &&
+                cpu.weaponAmmo?.cut_concrete > 10 && !activePlatform && this.random() < .22) {
+                if (cpu.weaponSet !== 'cut_concrete') cpu.selectWeaponSet('cut_concrete');
+                if (cpu.startRollingCutter(rivalAbove?'upper':'lower')) {
+                    // El proyectil ya tiene su vida propia; volver al Buster no lo borra.
+                    cpu.weaponSet='base';
+                    this.recordAction('rock_cutter'); wait(1150); return true;
+                }
+            }
+            if (!activePlatform && !rivalOnRockPlatform && now >= this.characterCooldownUntil &&
+                cpu.weaponAmmo?.leaf_snake > 10) {
+                const leafReady=distance<215&&this.random()<.12;
+                const trapReady=distance>=190&&distance<=510&&this.random()<.10;
+                if(leafReady||trapReady) {
+                    if(cpu.weaponSet!=='leaf_snake')cpu.selectWeaponSet('leaf_snake');
+                    let used=false,action='rock_snake';
+                    if(leafReady) {
+                        if(!cpu.leafShield) { used=cpu.startGreen('leaf'); action='rock_leaf'; }
+                        else if(!cpu.leafShield.thrown&&cpu.launchLeaf(towardRight?1:-1,0)) { used=true; action='rock_leaf'; }
+                        else { used=cpu.startGreen('bomb'); action='rock_bomb'; }
+                    } else if(trapReady&&distance<345&&this.random()<.32) {
+                        used=cpu.startGreen('bomb'); action='rock_bomb';
+                    } else if(trapReady) used=cpu.startGreen('snake');
+                    if(used) {
+                        cpu.weaponSet='base';
+                        this.recordAction(action); wait(1250); return true;
+                    }
+                }
+            }
+            if (distance >= 165 && distance <= 720 && cpu.weaponSet==='base' &&
+                now >= this.busterCooldownUntil && now >= this.characterCooldownUntil) {
+                this.setMovement(cpu,distance>370&&!towardRight,distance>370&&towardRight,false,
+                    cpu.isGrounded && rivalAbove && distance<430);
+                this.tapKey(cpu.controls.attack,cpu);
+                this.recordAction('buster');
+                this.busterCooldownUntil=now+850;
+                return true;
+            }
+            if (!activePlatform && !rivalOnRockPlatform && distance > 360 && cpu.weaponAmmo?.fire > 18 &&
+                now >= this.characterCooldownUntil && this.random() < .16) {
                 if (cpu.weaponSet !== 'fire') cpu.selectWeaponSet('fire');
-                if (this.random() < .5 && cpu.startHeatFire()) { this.recordAction('rock_fire'); wait(1700); return true; }
-                if (cpu.startFireShot()) { this.recordAction('rock_fire'); wait(450); return true; }
-            }
-            if (distance >= 220 && distance < 520 && player.isGrounded && cpu.weaponAmmo?.leaf_snake > 10 && now >= this.characterCooldownUntil) {
-                if (cpu.weaponSet !== 'leaf_snake') cpu.selectWeaponSet('leaf_snake');
-                if (cpu.startGreen('snake')) { this.recordAction('rock_fire'); wait(1250); return true; }
-            }
-            if (distance < 210 && player.isGrounded && cpu.weaponAmmo?.leaf_snake > 12 && now >= this.characterCooldownUntil) {
-                if (cpu.weaponSet !== 'leaf_snake') cpu.selectWeaponSet('leaf_snake');
-                if (!cpu.leafShield && cpu.startGreen('leaf')) { this.recordAction('rock_fire'); wait(1200); return true; }
-                if (cpu.leafShield && !cpu.leafShield.thrown && cpu.launchLeaf(towardRight ? 1 : -1, 0)) { this.recordAction('rock_fire'); wait(1200); return true; }
-                if (cpu.startGreen('bomb')) { this.recordAction('rock_fire'); wait(1200); return true; }
-            }
-            const direction = towardRight ? 1 : -1;
-            if (distance < 170 && cpu.isGrounded && now >= this.characterCooldownUntil && this.random() < .3 && cpu.startSlashClaw()) {
-                this.recordAction('heavy'); wait(650); return true;
+                const used = this.random()<.38 ? cpu.startHeatFire() : cpu.startFireShot();
+                if (used) {
+                    cpu.weaponSet='base';
+                    this.recordAction('rock_fire'); wait(1250); return true;
+                }
             }
             if (distance > 330) {
                     this.setMovement(cpu, direction < 0, direction > 0, false, cpu.isGrounded && distance > 620 && this.random() < .035);
@@ -627,21 +695,51 @@ export class CpuFighter {
                 return true;
             }
         }
-        if (cpu.characterId === 'espio' && now >= this.characterCooldownUntil && distance < 280) {
-            const technique = player.guardType === 'high' && distance < 115 ? 'drill' : 'smoke';
-            if (cpu.startNinjaTechnique(technique, player)) {
-                this.recordAction('espio_' + technique);
-                wait(1050);
+        if (cpu.characterId === 'espio') {
+            const opponentPlatform=(player.concretes??[]).some(item=>{
+                if(!item.active||!item.isPlatform?.())return false;
+                const r=item.platformRect;
+                return Math.abs(player.y+player.height-r.y)<20 && player.x+player.width>r.x && player.x<r.x+r.w;
+            });
+            const rivalAbove=!player.isGrounded || player.y+player.height<cpu.y+cpu.height-65;
+            const verticalGap=Math.abs((player.y+player.height)-(cpu.y+cpu.height));
+            if(opponentPlatform&&verticalGap>150&&distance>125&&cpu.isGrounded&&distance<560) {
+                const dir=towardRight?1:-1;
+                this.setMovement(cpu,dir<0,dir>0,false,true);
                 return true;
             }
-        }
-        if (cpu.characterId === 'espio' && player.characterId === 'bass' && distance > 210 &&
-            distance < 850 && now >= this.characterCooldownUntil) {
-            cpu.isThrowingShuriken = true;
-            cpu.shurikenTimer = 0;
-            cpu.shurikenWindup = 5;
-            this.setMovement(cpu, false, false, false);
-            wait(1450); return true;
+            if(now>=this.characterCooldownUntil&&!cpu.isBusy()&&!cpu.isHitstunned()) {
+                if(player.isGuarding&&player.guardType==='high'&&distance<250&&verticalGap<80&&cpu.isGrounded&&
+                    cpu.startNinjaTechnique('drill',player)) {
+                    this.recordAction('espio_drill'); wait(1050); return true;
+                }
+                if(player.isGuarding&&player.guardType==='low'&&distance<155&&verticalGap<70&&cpu.isGrounded) {
+                    cpu.keys[cpu.controls.crouch]=true;
+                    cpu.startJab();
+                    const started=cpu.isJabActive;
+                    cpu.keys[cpu.controls.crouch]=false;
+                    if(started){this.recordAction('espio_low_jab');wait(650);return true;}
+                }
+                if(rivalAbove&&verticalGap<155&&distance<265&&cpu.isGrounded&&cpu.startNinjaTechnique('tornado',player)) {
+                    this.recordAction('espio_tornado'); wait(1120); return true;
+                }
+                if(distance<280&&verticalGap<80&&cpu.isGrounded) {
+                    const technique=player.isGuarding?'drill':'smoke';
+                    if(cpu.startNinjaTechnique(technique,player)) {
+                        this.recordAction('espio_'+technique); wait(1050); return true;
+                    }
+                }
+                if(distance>=270&&distance<=780&&verticalGap<175&&cpu.isGrounded&&!cpu.isThrowingShuriken&&this.random()<.55) {
+                    cpu.isThrowingShuriken=true; cpu.shurikenTimer=0; cpu.shurikenWindup=5;
+                    this.setMovement(cpu,false,false,false);
+                    this.recordAction('espio_shuriken'); wait(1450); return true;
+                }
+            }
+            if((rivalAbove||opponentPlatform)&&distance>125&&cpu.isGrounded&&distance<560) {
+                const dir=towardRight?1:-1;
+                this.setMovement(cpu,dir<0,dir>0,false,true);
+                return true;
+            }
         }
         if (cpu.hasBuster && player.characterId === 'bass' && distance > 155 && distance < 950 &&
             this.chargeBusterAgainstBass(cpu, player, now)) return true;
@@ -795,6 +893,7 @@ export class CpuFighter {
             if (cpu) this.setMovement(cpu, false, false, false);
             return;
         }
+        this.decisionFramesThisMatch++;
         const dx = (player.x + player.width / 2) - (cpu.x + cpu.width / 2);
         const distance = Math.abs(dx);
         const towardRight = dx > 0;
@@ -1092,6 +1191,7 @@ export class CpuFighter {
             this.guardHoldUntil = Math.max(this.guardHoldUntil, now + 180 + this.random() * 180);
         }
         if (this.guardHoldUntil > now && canGuard && !snakeThreat) {
+            this.guardFramesThisMatch++;
             const back = towardRight ? cpu.controls.left : cpu.controls.right;
             const low = Boolean(player.isCrouching);
             this.setMovement(cpu, back === cpu.controls.left, back === cpu.controls.right, low);
@@ -1350,6 +1450,8 @@ export class CpuFighter {
         this.actionCounts = {};
         this.hitsThisMatch = 0;
         this.blocksThisMatch = 0;
+        this.decisionFramesThisMatch = 0;
+        this.guardFramesThisMatch = 0;
         this.repeatPenalties = 0;
         this.spinPlan = null;
         this.spinCooldownUntil = 0;

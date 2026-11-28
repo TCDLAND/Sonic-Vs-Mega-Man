@@ -3,6 +3,7 @@
 // ========================================
 
 import { GAME_STATE } from './config.js';
+import { installPaletteRendering } from './character-palettes.js?v=palette-exact-4';
 
 export const game = {
     cameraX: 0,
@@ -19,6 +20,7 @@ export const game = {
     cpuAgentP1: null,
     cpuAgentP2: null,
     teamRosters: null,
+    teamPaletteRosters: null,
     teamFighters: null,
     teamActiveIndex: { p1: 0, p2: 0 },
     tagRequests: { p1: false, p2: false },
@@ -35,13 +37,17 @@ export const game = {
         p2Index: 0,
         p1Confirmed: false,
         p2Confirmed: false,
+        p1Palette: 0,
+        p2Palette: 0,
         chars: ["espio", "bass", "sonic", "shadow", "knuckles", "silver", "x", "zero", "rock", "protoman", "eggman", "wily", "emerl", "megaman-zero", "metal-sonic", "tails", "chaos"]
     }
 };
+window.__GAME__ = game;
 
 export const canvas = document.getElementById("gameCanvas");
 export const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
+installPaletteRendering(ctx);
 
 export const tongueCanvas = document.createElement('canvas');
 tongueCanvas.width = 1024;

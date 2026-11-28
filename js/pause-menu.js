@@ -1,7 +1,7 @@
 import { deviceFor, padSpinChord, usingXbox, xboxCommand } from './input-labels.js';
 import { music } from './music.js';
 import { game } from './state.js';
-import { applyBattleControllers, returnToCharacterSelect } from './battle.js?v=team3-1';
+import { applyBattleControllers, returnToCharacterSelect } from './battle.js?v=palette-system-1';
 import { setCombatPaused } from './combat-clock.js';
 
 // J/I/M/K representan los cuatro botones de ataque. Se traducen para cada lado.
